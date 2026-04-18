@@ -1,3 +1,4 @@
+# OS / IDE
 .venv/
 __pycache__/
 *.pyc
@@ -8,34 +9,53 @@ __pycache__/
 .ruff_cache/
 .DS_Store
 Thumbs.db
+
+# Environment
 .env
 .env.*
+
+# Frontend / Node
 node_modules/
 dist/
-build/
 coverage/
+
+# Logs
 logs/
 *.log
-ai-service/models/*.pth
-ai-service/models/*.pt
-ai-service/models/*.onnx
-!ai-service/models/README.md
 
-# Internal notes, logs, and test guides
-project-log.md
-**/SERVICE-NOTES.md
-*E2E*GUIDE*.md
-**/*E2E*GUIDE*.md
-*report*.md
-**/*report*.md
 # Build artifacts
 **/target/
 **/build/
+build/
 *.jar
 *.war
 tmp/
 
-# AI Models (Vì quá nặng, không nên đưa lên Git)
+# Runtime data
+**/uploads/
+ai-service/tests/output/
+
+# Tests
+**/src/test/
+**/tests/
+
+# Internal notes / reports / guides
+agent.md
+project-log.md
+**/SERVICE-NOTES.md
+docs/
+*E2E*GUIDE*.md
+**/*E2E*GUIDE*.md
+*report*.md
+**/*report*.md
+h-smart-microservices-architecture.md
+
+# AI model artifacts
 ai-service/models/*.zip
 ai-service/models/*.pth
+ai-service/models/*.pt
+ai-service/models/*.onnx
 ai-service/models/*.pkl
+!ai-service/models/README.md
+!ai-service/models/classes.json
+!ai-service/models/config_infer.yaml
