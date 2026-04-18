@@ -1,0 +1,274 @@
+{
+  "thing_classes": [
+    "air_conditioner",
+    "bed",
+    "bedspread",
+    "bench",
+    "blender",
+    "bunk_bed",
+    "cabinet",
+    "chair",
+    "coffee_table",
+    "sofa_bed",
+    "cupboard",
+    "deck_chair",
+    "desk",
+    "dining_table",
+    "drawer",
+    "electric_chair",
+    "refrigerator",
+    "fan",
+    "faucet",
+    "file_cabinet",
+    "folding_chair",
+    "hand_glass",
+    "highchair",
+    "kettle",
+    "kitchen_sink",
+    "kitchen_table",
+    "lamp",
+    "mattress",
+    "microwave_oven",
+    "mirror",
+    "music_stool",
+    "oil_lamp",
+    "oven",
+    "pew_(church_bench)",
+    "poker_(fire_stirring_tool)",
+    "pool_table",
+    "recliner",
+    "rocking_chair",
+    "sink",
+    "sofa",
+    "step_stool",
+    "stool",
+    "stove",
+    "table-tennis_table",
+    "table",
+    "table_lamp",
+    "television_camera",
+    "television_set",
+    "toaster_oven",
+    "vacuum_cleaner",
+    "wardrobe",
+    "automatic_washer",
+    "water_faucet"
+  ],
+  "num_classes": 53,
+  "categories": [
+    {
+      "id": 2,
+      "name": "air_conditioner"
+    },
+    {
+      "id": 77,
+      "name": "bed"
+    },
+    {
+      "id": 79,
+      "name": "bedspread"
+    },
+    {
+      "id": 90,
+      "name": "bench"
+    },
+    {
+      "id": 112,
+      "name": "blender"
+    },
+    {
+      "id": 170,
+      "name": "bunk_bed"
+    },
+    {
+      "id": 181,
+      "name": "cabinet"
+    },
+    {
+      "id": 232,
+      "name": "chair"
+    },
+    {
+      "id": 285,
+      "name": "coffee_table"
+    },
+    {
+      "id": 301,
+      "name": "sofa_bed"
+    },
+    {
+      "id": 346,
+      "name": "cupboard"
+    },
+    {
+      "id": 358,
+      "name": "deck_chair"
+    },
+    {
+      "id": 361,
+      "name": "desk"
+    },
+    {
+      "id": 367,
+      "name": "dining_table"
+    },
+    {
+      "id": 390,
+      "name": "drawer"
+    },
+    {
+      "id": 420,
+      "name": "electric_chair"
+    },
+    {
+      "id": 421,
+      "name": "refrigerator"
+    },
+    {
+      "id": 429,
+      "name": "fan"
+    },
+    {
+      "id": 430,
+      "name": "faucet"
+    },
+    {
+      "id": 438,
+      "name": "file_cabinet"
+    },
+    {
+      "id": 464,
+      "name": "folding_chair"
+    },
+    {
+      "id": 535,
+      "name": "hand_glass"
+    },
+    {
+      "id": 558,
+      "name": "highchair"
+    },
+    {
+      "id": 604,
+      "name": "kettle"
+    },
+    {
+      "id": 609,
+      "name": "kitchen_sink"
+    },
+    {
+      "id": 610,
+      "name": "kitchen_table"
+    },
+    {
+      "id": 626,
+      "name": "lamp"
+    },
+    {
+      "id": 679,
+      "name": "mattress"
+    },
+    {
+      "id": 687,
+      "name": "microwave_oven"
+    },
+    {
+      "id": 694,
+      "name": "mirror"
+    },
+    {
+      "id": 710,
+      "name": "music_stool"
+    },
+    {
+      "id": 731,
+      "name": "oil_lamp"
+    },
+    {
+      "id": 739,
+      "name": "oven"
+    },
+    {
+      "id": 795,
+      "name": "pew_(church_bench)"
+    },
+    {
+      "id": 826,
+      "name": "poker_(fire_stirring_tool)"
+    },
+    {
+      "id": 831,
+      "name": "pool_table"
+    },
+    {
+      "id": 878,
+      "name": "recliner"
+    },
+    {
+      "id": 889,
+      "name": "rocking_chair"
+    },
+    {
+      "id": 961,
+      "name": "sink"
+    },
+    {
+      "id": 982,
+      "name": "sofa"
+    },
+    {
+      "id": 1013,
+      "name": "step_stool"
+    },
+    {
+      "id": 1018,
+      "name": "stool"
+    },
+    {
+      "id": 1021,
+      "name": "stove"
+    },
+    {
+      "id": 1049,
+      "name": "table-tennis_table"
+    },
+    {
+      "id": 1050,
+      "name": "table"
+    },
+    {
+      "id": 1051,
+      "name": "table_lamp"
+    },
+    {
+      "id": 1076,
+      "name": "television_camera"
+    },
+    {
+      "id": 1077,
+      "name": "television_set"
+    },
+    {
+      "id": 1096,
+      "name": "toaster_oven"
+    },
+    {
+      "id": 1138,
+      "name": "vacuum_cleaner"
+    },
+    {
+      "id": 1158,
+      "name": "wardrobe"
+    },
+    {
+      "id": 1160,
+      "name": "automatic_washer"
+    },
+    {
+      "id": 1164,
+      "name": "water_faucet"
+    }
+  ],
+  "score_thresh_test": 0.4,
+  "base_config": "LVISv1-InstanceSegmentation/mask_rcnn_R_50_FPN_1x.yaml"
+}

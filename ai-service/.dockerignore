@@ -1,0 +1,9 @@
+.venv
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+run_ai.log
+run_ai.err.log
+models/model (1).pth
+models/refind_bundle.zip

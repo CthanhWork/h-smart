@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: backend-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://postgres-db:5432/hsmart}
+    username: ${SPRING_DATASOURCE_USERNAME:hsmart}
+    password: ${SPRING_DATASOURCE_PASSWORD:hsmart_password}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+server:
+  port: ${SERVER_PORT:8080}
+app:
+  public-base-url: ${APP_PUBLIC_BASE_URL:http://localhost:8080}
+services:
+  ai:
+    base-url: ${AI_SERVICE_BASE_URL:http://ai-service:8000}
+storage:
+  upload-dir: ${STORAGE_UPLOAD_DIR:uploads}
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html

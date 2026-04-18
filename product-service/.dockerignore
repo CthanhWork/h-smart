@@ -1,0 +1,5 @@
+target/
+uploads/
+.vscode/
+.idea/
+*.iml

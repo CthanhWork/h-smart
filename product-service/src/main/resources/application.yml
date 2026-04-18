@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: product-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://product-postgres-db:5432/hsmart_product_db}
+    username: ${SPRING_DATASOURCE_USERNAME:hsmart}
+    password: ${SPRING_DATASOURCE_PASSWORD:hsmart_password}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+server:
+  port: ${SERVER_PORT:8082}
+app:
+  public-base-url: ${APP_PUBLIC_BASE_URL:http://localhost:8000}
+services:
+  ai:
+    base-url: ${AI_SERVICE_BASE_URL:http://localhost:8002}
+storage:
+  upload-dir: ${STORAGE_UPLOAD_DIR:uploads}
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+logging:
+  level:
+    com.hsmart.backend: INFO

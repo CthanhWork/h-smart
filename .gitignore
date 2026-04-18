@@ -1,0 +1,41 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.DS_Store
+Thumbs.db
+.env
+.env.*
+node_modules/
+dist/
+build/
+coverage/
+logs/
+*.log
+ai-service/models/*.pth
+ai-service/models/*.pt
+ai-service/models/*.onnx
+!ai-service/models/README.md
+
+# Internal notes, logs, and test guides
+project-log.md
+**/SERVICE-NOTES.md
+*E2E*GUIDE*.md
+**/*E2E*GUIDE*.md
+*report*.md
+**/*report*.md
+# Build artifacts
+**/target/
+**/build/
+*.jar
+*.war
+tmp/
+
+# AI Models (Vì quá nặng, không nên đưa lên Git)
+ai-service/models/*.zip
+ai-service/models/*.pth
+ai-service/models/*.pkl

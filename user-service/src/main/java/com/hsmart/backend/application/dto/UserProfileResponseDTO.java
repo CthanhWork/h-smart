@@ -1,0 +1,24 @@
+package com.hsmart.backend.application.dto;
+
+import com.hsmart.backend.domain.entities.Role;
+import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+@Schema(name = "UserProfileResponse", description = "Thong tin ho so nguoi dung")
+public class UserProfileResponseDTO {
+    private Long id;
+    private String username;
+    private String email;
+    private Role role;
+    private String fullName;
+    private String phoneNumber;
+    private String address;
+    private String avatarUrl;
+}
