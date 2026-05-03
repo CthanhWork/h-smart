@@ -1,0 +1,963 @@
+[2026-04-08] user-service initialized
+
+- Service: `user-service`
+- Database: `hsmart_user_db` (PostgreSQL, dedicated per service)
+- New endpoints:
+  - `POST /api/v1/auth/register`
+  - `POST /api/v1/auth/login`
+  - `GET /api/v1/users/profile`
+  - `PUT /api/v1/users/profile`
+  - `GET /health`
+- Security:
+  - JWT Bearer auth implemented
+  - Swagger whitelist:
+    - `/v3/api-docs/**`
+    - `/swagger-ui/**`
+    - `/swagger-ui.html`
+  - Auth whitelist:
+    - `/api/v1/auth/**`
+    - `/health`
+- Clean architecture packages added:
+  - `domain.entities`
+  - `application.dto`
+  - `application.mapper`
+  - `service`
+  - `service.impl`
+  - `presentation.controllers`
+  - `infrastructure.persistence`
+  - `infrastructure.config`
+  - `infrastructure.exception`
+- Inter-service communication:
+  - No runtime dependency on other services yet.
+  - `user-service` is currently self-contained and does not call `ai-service`.
+- Technical notes:
+  - `User` currently aggregates both auth fields and profile fields for a lean first version.
+  - Password is hashed with BCrypt.
+  - DTO/entity mapping uses MapStruct.
+  - Docker Compose updated with:
+    - `user-postgres-db`
+    - `user-service`
+  - Local Maven build passed.
+  - Docker image build was not verified in this session because Docker daemon was unavailable on the machine.
+
+[2026-04-08] user-service notes expanded
+
+- File updated: `user-service/SERVICE-NOTES.md`
+- Scope:
+  - Expanded service notes into detailed implementation handoff document.
+  - Added sections for:
+    - architecture/package layout
+    - entity and DTO inventory
+    - JWT/security flow
+    - endpoint contract
+    - config/env variables
+    - Docker/Compose wiring
+    - current verification status
+    - known limitations and next steps
+- Technical note:
+  - No runtime code changes in this task.
+  - This update is documentation-only to preserve service context for next sessions.
+
+[2026-04-08] user-service runtime verified
+
+- Verified services:
+  - `user-postgres-db`
+  - `user-service`
+- Docker status:
+  - Docker daemon available
+  - `docker compose build user-service` passed
+  - `docker compose up -d user-postgres-db user-service` passed
+- Verified endpoints:
+  - `GET /health`
+  - `POST /api/v1/auth/register`
+  - `POST /api/v1/auth/login`
+  - `GET /api/v1/users/profile`
+  - `PUT /api/v1/users/profile`
+- Verified auth flow:
+  - user registration creates row in `hsmart_user_db`
+  - login returns Bearer JWT
+  - JWT authorizes profile read/update
+- Technical notes:
+  - One earlier `401` on login was caused by testing `register` and `login` in parallel before the register transaction had completed.
+  - Sequential test flow works correctly.
+
+[2026-04-09] user-service status code policy and automated tests added
+
+- Service: `user-service`
+- Database: `hsmart_user_db` (PostgreSQL, dedicated per service)
+- Code changes:
+  - Added `400 Bad Request` handling for malformed JSON via `HttpMessageNotReadableException`
+  - Preserved existing mappings for:
+    - `201 Created` on register success
+    - `200 OK` on login/profile/update success
+    - `401 Unauthorized` on missing JWT or invalid credentials
+    - `403 Forbidden` via security access denied handler
+    - `404 Not Found` via `ResourceNotFoundException`
+    - `409 Conflict` via `DuplicateResourceException`
+    - `500 Internal Server Error` via generic exception fallback
+- Documentation added:
+  - `docs/microservices-status-code-policy.md`
+  - `docs/user-service-status-testcases.md`
+- Test files added:
+  - `user-service/src/test/java/com/hsmart/backend/presentation/controllers/UserServiceStatusCodeTest.java`
+  - `user-service/src/test/java/com/hsmart/backend/infrastructure/config/SecurityHandlersTest.java`
+  - `user-service/src/test/resources/application.yml`
+- Build/test verification:
+  - `mvn -q test` passed in `user-service`
+- Inter-service communication notes:
+  - No new downstream service calls were introduced.
+  - `502`, `503`, and `504` remain gateway-level or integration-level concerns and are not emitted directly by `user-service`.
+
+[2026-04-09] api-gateway initialized and runtime verified
+
+- Service: `api-gateway`
+- Database: none
+- Port:
+  - `api-gateway` runs on `8000`
+- New routes:
+  - `GET/POST /api/v1/auth/**` -> `user-service`
+  - `GET/PUT /api/v1/users/**` -> `user-service`
+- Gateway stack:
+  - Spring Boot 3 (reactive)
+  - Spring Cloud Gateway
+  - `spring-boot-starter-webflux`
+  - no `spring-boot-starter-web`
+- Gateway features added:
+  - global CORS via `CorsWebFilter`
+  - global request/response logging filter with English log messages
+  - custom reactive error handler returning `ApiResponse<T>` JSON
+  - `GET /health`
+- Status code handling:
+  - `502 Bad Gateway` returns:
+    - `Gateway could not connect to the downstream service (Bad Gateway)`
+  - `504 Gateway Timeout` returns:
+    - `Gateway timed out while waiting for the downstream service (Gateway Timeout)`
+  - `503 Service Unavailable` returns:
+    - `The requested service is temporarily unavailable (Service Unavailable)`
+- Verification:
+  - `mvn -q test` passed in `api-gateway`
+  - `mvn -q -DskipTests package` passed in `api-gateway`
+  - `docker compose build api-gateway` passed
+  - `GET http://localhost:8000/health` passed
+  - routing through gateway passed:
+    - `GET http://localhost:8000/api/v1/users/profile` -> downstream `401 Unauthorized`
+    - `POST http://localhost:8000/api/v1/auth/register` -> downstream `201 Created`
+  - `502 Bad Gateway` runtime verification passed by temporarily stopping `user-service`
+  - `504 Gateway Timeout` mapping is covered by unit test `GatewayExceptionMapperTest`
+- Inter-service communication changes:
+  - frontend can now call `user-service` through `api-gateway` instead of port `8081`
+  - route target configured through `USER_SERVICE_URL`
+- Technical notes:
+  - `api-gateway` required a Spring Boot patch bump to `3.3.6` to align with `spring-cloud-gateway` and Spring Framework `HttpHeaders.headerSet()`
+  - host debug port for `ai-service` in `docker-compose.yml` was moved from `8000` to `8002` so `api-gateway` can own port `8000`
+
+[2026-04-10] api-gateway JWT validation filter integrated
+
+- Service: `api-gateway`
+- Database: none
+- Port:
+  - `api-gateway` remains on `8000`
+- Security changes:
+  - shared `JWT_SECRET` configured in `api-gateway` to validate the same JWT issued by `user-service`
+  - custom `AuthenticationFilter` implemented using `AbstractGatewayFilterFactory`
+  - JWT signature and expiration are validated before forwarding protected requests
+- Public whitelist:
+  - `/api/v1/auth/**`
+  - `/health`
+  - `/v3/api-docs/**`
+  - `/swagger-ui/**`
+  - `/swagger-ui.html`
+  - `OPTIONS` requests
+- Protected endpoints currently covered by the gateway filter:
+  - `/api/v1/users/**`
+  - by configuration design, any future routed endpoint using the gateway default filter unless explicitly whitelisted
+- Error contract:
+  - missing or invalid JWT now returns:
+    - `401 Unauthorized`
+    - `Invalid or missing security token`
+  - output is returned as `ApiResponse<T>` JSON in English
+- Header forwarding:
+  - after successful JWT validation, the gateway forwards `X-User-Id` to downstream services
+  - current value of `X-User-Id` is the JWT subject, which is currently the `username` issued by `user-service`
+- Verification:
+  - `mvn -q test` passed in `api-gateway`
+  - `mvn -q -DskipTests package` passed in `api-gateway`
+  - `docker compose build api-gateway` passed
+  - `GET http://localhost:8000/health` passed after integration
+  - `GET http://localhost:8000/api/v1/users/profile` without token returned:
+    - `401`
+    - `Invalid or missing security token`
+  - `POST http://localhost:8000/api/v1/auth/register` remained accessible without token through whitelist
+  - `GET http://localhost:8000/api/v1/users/profile` with valid token returned downstream `200`
+  - `AuthenticationFilterTest` verified request mutation and `X-User-Id` forwarding before downstream handoff
+- Technical notes:
+  - route configuration uses gateway `default-filters` with `AuthenticationFilter`
+  - all custom gateway auth log messages remain in English
+
+[2026-04-10] product-service initialized and runtime verified
+
+- Service: `product-service`
+- Database: `hsmart_product_db` (PostgreSQL, dedicated per service)
+- Port:
+  - `product-service` runs on `8082`
+- New endpoints:
+  - `POST /api/v1/products/categories`
+  - `GET /api/v1/products/categories`
+  - `POST /api/v1/products`
+  - `GET /api/v1/products`
+  - `GET /api/v1/products/{id}`
+  - `GET /api/v1/products/media/{filename}`
+  - `GET /health`
+- Core domain:
+  - `Category` entity added for product catalog
+  - `Product` entity added with:
+    - `title`
+    - `description`
+    - `price`
+    - `status`
+    - `sellerId`
+    - `imageUrl`
+    - `aiMetadata`
+    - `category`
+  - `ProductStatus` enum added with:
+    - `ACTIVE`
+    - `SOLD`
+- Identity / request context:
+  - `product-service` does not decode JWT
+  - `UserContextFilter` extracts `X-User-Id`
+  - `UserContextHolder` stores the current user id in request-scoped `ThreadLocal`
+  - `sellerId` is taken from forwarded `X-User-Id`
+- AI integration:
+  - `VisionServiceImpl` calls `POST {AI_SERVICE_BASE_URL}/api/v1/predict`
+  - AI detections are stored in `Product.aiMetadata`
+  - `aiMetadata` is persisted as JSONB-compatible content
+- Smart naming:
+  - if `title` is blank, the service selects the highest-confidence AI label
+  - known LVIS labels are translated to display names
+  - verified example:
+    - `chair` -> `Ghe`
+- Media storage:
+  - uploaded files are stored under `product-service/uploads`
+  - image URLs are returned as absolute gateway URLs:
+    - `http://localhost:8000/api/v1/products/media/{filename}`
+- Gateway integration changes:
+  - `api-gateway` route added:
+    - `/api/v1/products/**` -> `product-service`
+  - gateway whitelist updated:
+    - `/api/v1/products/media/**`
+  - protected product endpoints now require gateway JWT validation
+- Verification:
+  - `mvn -q test` passed in `product-service`
+  - `mvn -q -DskipTests package` passed in `product-service`
+  - `docker compose build product-service` passed
+  - `docker compose up -d product-postgres-db product-service` passed
+  - `docker compose ps` confirmed:
+    - `product-postgres-db` healthy
+    - `product-service` healthy
+  - runtime flow verified through `api-gateway`:
+    - register user -> `201 Created`
+    - login user -> `200 OK`
+    - create category -> `201 Created`
+    - create product with multipart image -> `201 Created`
+    - list products -> `200 OK`
+    - fetch product detail -> `200 OK`
+    - fetch media URL without JWT -> `200 OK`
+    - request protected product endpoint without JWT -> `401 Unauthorized`
+- Inter-service communication flow:
+  - frontend -> `api-gateway` -> `product-service`
+  - `api-gateway` validates JWT and forwards `X-User-Id`
+  - `product-service` uses `X-User-Id` as `sellerId`
+  - `product-service` calls `ai-service` over REST for image analysis
+- Technical notes:
+  - all product-service API messages remain in English
+  - all product-service logs remain in English
+  - an earlier verification attempt recreated the container from a stale image because `docker compose build` and `up` were run in parallel; this was corrected by rebuilding and restarting sequentially
+
+[2026-04-12] week 3 implementation report added
+
+- Scope:
+  - Created a dedicated week 3 report based on the already verified implementation state of:
+    - `ai-service`
+    - `user-service`
+    - `api-gateway`
+    - `product-service`
+- File added:
+  - `docs/week-3-report.md`
+- Report coverage:
+  - week 3 objectives
+  - service-by-service implementation summary
+  - status code policy usage
+  - JWT gateway validation and `X-User-Id` forwarding
+  - AI integration inside `product-service`
+  - Docker/runtime verification summary
+  - known limitations and next-step direction
+- Technical notes:
+  - This task is documentation-only.
+  - No runtime code or infrastructure behavior was changed.
+
+[2026-04-12] week 3 report reformatted for Word-friendly Vietnamese text
+
+- Scope:
+  - Rewrote `docs/week-3-report.md` in Vietnamese with diacritics.
+  - Removed Markdown-style formatting and technical presentation characters so the content can be pasted directly into Microsoft Word.
+- File updated:
+  - `docs/week-3-report.md`
+- Technical notes:
+  - Content scope remains the same as the previous week 3 report.
+  - This task is documentation-only.
+  - No code, API contract, runtime flow, or infrastructure behavior was changed.
+
+[2026-04-16] product-service CRUD, soft delete, and ownership validation completed
+
+- Services affected:
+  - `product-service`
+  - `user-service`
+- Databases:
+  - `hsmart_product_db` for `product-service`
+  - `hsmart_user_db` for `user-service`
+- Product service domain changes:
+  - `Product` now includes:
+    - `isDeleted`
+    - `updatedAt`
+  - `ProductStatus` now supports:
+    - `ACTIVE`
+    - `SOLD`
+    - `HIDDEN`
+- Product service endpoint changes:
+  - added `PUT /api/v1/products/{id}`
+  - added `DELETE /api/v1/products/{id}`
+  - existing `GET /api/v1/products`
+  - existing `GET /api/v1/products/{id}`
+  - all read APIs now return only products where `isDeleted = false`
+- Soft delete behavior:
+  - `DELETE /api/v1/products/{id}` no longer removes the row
+  - the service updates `isDeleted = true`
+  - subsequent list/detail reads exclude the soft deleted product
+- Ownership validation:
+  - `product-service` reads the current user from `X-User-Id` via `UserContextHolder`
+  - update and delete now compare the forwarded user id with `sellerId`
+  - mismatched ownership returns:
+    - `403 Forbidden`
+    - `You do not have permission to modify this product`
+- Exception handling:
+  - `OwnershipDeniedException` added and mapped to `403 Forbidden`
+  - product-service exception responses remain wrapped in `ApiResponse<T>`
+- English-only runtime alignment:
+  - reviewed `product-service` runtime messages and logs
+  - reviewed `user-service` runtime messages and security handler responses
+  - runtime API messages and logs are now aligned in English across both services
+  - remaining non-English text is limited to business label translation and some DTO documentation text, not runtime responses
+- Verification:
+  - `mvn -q test` passed in `product-service`
+  - `mvn -q test` passed in `user-service`
+  - added/verified service tests for:
+    - ownership rejection on product update
+    - soft delete on owned product
+- Inter-service communication notes:
+  - no new service-to-service dependency was added
+  - `product-service` still relies on `api-gateway` to validate JWT and forward `X-User-Id`
+  - downstream AI communication flow remains:
+    - `product-service` -> `ai-service` via REST `POST /api/v1/predict`
+
+[2026-04-16] gateway product routing and end-to-end product test guide synchronized
+
+- Services affected:
+  - `api-gateway`
+  - `product-service`
+- Route verification:
+  - confirmed `api-gateway` has route:
+    - `/api/v1/products/**` -> `product-service`
+  - confirmed `AuthenticationFilter` whitelist includes:
+    - `/api/v1/products/media/**`
+- Documentation updates:
+  - updated `api-gateway/SERVICE-NOTES.md` to reflect:
+    - product route support
+    - `PRODUCT_SERVICE_URL`
+    - public media whitelist behavior
+  - added `E2E-TEST-GUIDE.md` at project root
+- E2E guide coverage:
+  - register and login through `http://localhost:8000`
+  - create category and create product through the gateway
+  - verify `sellerId` against authenticated user and database row
+  - access `imageUrl` publicly through gateway
+  - valid owner update returns `200 OK`
+  - invalid non-owner update returns:
+    - `403 Forbidden`
+    - `You do not have permission to modify this product`
+  - soft delete verification through product list filtering and database check
+- Contract alignment:
+  - corrected the E2E guide to match the current controller contract:
+    - create uses multipart field `file`
+    - update uses form fields via `@ModelAttribute`
+- English-only verification:
+  - scanned runtime code in `user-service` and `product-service`
+  - no remaining Vietnamese runtime response messages or log strings were found
+- Inter-service communication notes:
+  - gateway remains the single external entry point on port `8000`
+  - media access is public through the gateway
+  - protected product operations still depend on gateway JWT validation and forwarded `X-User-Id`
+
+[2026-04-18] interaction-service initialized with MongoDB, chat, notifications, and gateway routing
+
+- Services affected:
+  - `interaction-service`
+  - `api-gateway`
+- Databases:
+  - `hsmart_interaction_db` for `interaction-service` on MongoDB
+- New service:
+  - `interaction-service` runs on `8083`
+  - stack:
+    - Spring Boot 3
+    - Java 17
+    - Spring WebSocket with STOMP
+    - Spring Data MongoDB
+- New interaction-service endpoints:
+  - `GET /health`
+  - `GET /api/v1/interactions/messages`
+  - `POST /api/v1/interactions/notifications`
+  - `GET /api/v1/interactions/notifications`
+  - WebSocket handshake endpoint:
+    - `/api/v1/interactions/ws`
+- MongoDB documents added:
+  - `chat_messages`
+    - `senderId`
+    - `receiverId`
+    - `productId`
+    - `content`
+    - `timestamp`
+  - `notifications`
+    - `userId`
+    - `type`
+    - `message`
+    - `productId`
+    - `read`
+    - `timestamp`
+- Identity handling:
+  - REST requests use `UserContextFilter` to read `X-User-Id`
+  - WebSocket handshake stores `X-User-Id` in session attributes
+  - STOMP `CONNECT` binds the forwarded user id to a `Principal`
+- Chat behavior:
+  - incoming chat messages are persisted in MongoDB
+  - messages are published to:
+    - `/user/queue/messages`
+  - receiver notifications are created automatically for new chat messages
+- Notification behavior:
+  - notifications can be created through REST
+  - current-user notifications are fetched through REST
+  - notifications are published to:
+    - `/user/queue/notifications`
+- Gateway routing changes:
+  - added HTTP route:
+    - `/api/v1/interactions/**` -> `interaction-service`
+  - added WebSocket route:
+    - `/api/v1/interactions/ws`
+    - `/api/v1/interactions/ws/**`
+    - both route to `interaction-service` over `ws://`
+  - gateway authentication remains enabled for interaction routes
+  - gateway now also accepts `?token=<jwt>` for WebSocket handshake requests under `/api/v1/interactions/ws/**`
+  - after validation, gateway continues forwarding `X-User-Id` downstream
+- Docker Compose changes:
+  - added `interaction-mongo-db`
+  - added `interaction-service`
+  - added `INTERACTION_SERVICE_URL`
+  - added `INTERACTION_SERVICE_WS_URL`
+  - `api-gateway` now depends on `interaction-service`
+- Documentation added:
+  - `interaction-service/SERVICE-NOTES.md`
+- Verification:
+  - `mvn -q test` passed in `interaction-service`
+  - `mvn -q test` passed in `api-gateway` after routing and authentication updates
+  - `AuthenticationFilterTest` now verifies WebSocket handshake authentication through `?token=<jwt>`
+- Technical notes:
+  - runtime API messages and logs remain in English
+  - REST error handling follows the shared status code policy for:
+    - `200`
+    - `201`
+    - `400`
+    - `401`
+    - `500`
+  - WebSocket handshake and message delivery are now ready for end-to-end runtime verification with Docker
+
+[2026-04-18] full Docker runtime verified for interaction-service and interaction E2E guide added
+
+- Services verified at runtime:
+  - `ai-service`
+  - `api-gateway`
+  - `user-service`
+  - `product-service`
+  - `interaction-service`
+  - PostgreSQL containers
+  - MongoDB container
+- Docker verification:
+  - `docker compose up -d --build` passed for the full stack
+  - `docker compose ps -a` confirmed all H-Smart services are up
+  - verified healthy containers:
+    - `h-smart-api-gateway`
+    - `h-smart-user-service`
+    - `h-smart-product-service`
+    - `h-smart-interaction-service`
+    - `h-smart-ai-service`
+    - `h-smart-user-postgres-db`
+    - `h-smart-product-postgres-db`
+    - `h-smart-postgres-db`
+    - `h-smart-interaction-mongo-db`
+- Gateway to interaction-service verification:
+  - runtime calls through `http://localhost:8000/api/v1/interactions/**` returned:
+    - `200 OK`
+    - `201 Created`
+  - gateway logs showed successful authentication and successful outgoing responses for:
+    - `GET /api/v1/interactions/notifications`
+    - `POST /api/v1/interactions/notifications`
+    - `GET /api/v1/interactions/messages`
+    - `GET /api/v1/interactions/ws`
+  - no `502` or `504` responses were observed during the verified interaction runtime flow
+- MongoDB verification:
+  - `interaction-service` logs confirmed:
+    - Mongo client creation
+    - successful connection to `interaction-mongo-db:27017`
+  - direct `mongosh` queries confirmed persisted data in:
+    - `notifications`
+    - `chat_messages`
+- Verified runtime interaction flows:
+  - login through gateway for two users
+  - REST notification fetch through gateway
+  - REST notification creation through gateway
+  - WebSocket STOMP handshake through gateway using:
+    - `ws://localhost:8000/api/v1/interactions/ws?token=<jwt>`
+  - real-time chat delivery to:
+    - `/user/queue/messages`
+  - automatic notification delivery to:
+    - `/user/queue/notifications`
+  - persisted `CHAT` notification and chat message documents in MongoDB
+- Error contract verification:
+  - missing JWT on interaction REST route returns `401`
+  - missing `participantId` on message history route now returns:
+    - `400 Bad Request`
+    - `participantId is required`
+- Code change made during runtime verification:
+  - updated `interaction-service` exception handling to map `MissingServletRequestParameterException` to `400 Bad Request`
+- Documentation updates:
+  - added `INTERACTION-E2E-TEST-GUIDE.md`
+  - updated `interaction-service/SERVICE-NOTES.md` with runtime verification status
+- Technical notes:
+  - interaction-service runtime messages and logs remain in English
+  - the interaction testing guide now covers:
+    - REST verification
+    - WebSocket handshake
+    - STOMP chat send/receive
+    - automatic notification verification
+
+[2026-04-18] repository ignore policy and root README standardized
+
+- Files updated:
+  - `.gitignore`
+  - `README.md`
+- `.gitignore` changes:
+  - preserved existing environment, build, and model ignore rules
+  - added internal documentation ignore rules for operational notes and generated logs
+- Ignore patterns added:
+  - `project-log.md`
+  - `**/SERVICE-NOTES.md`
+  - `*E2E*GUIDE*.md`
+  - `**/*E2E*GUIDE*.md`
+  - `*report*.md`
+  - `**/*report*.md`
+  - `*.log` remained enabled
+- Files now covered by ignore rules include:
+  - `project-log.md`
+  - `interaction-service/SERVICE-NOTES.md`
+  - `api-gateway/SERVICE-NOTES.md`
+  - `E2E-TEST-GUIDE.md`
+  - `INTERACTION-E2E-TEST-GUIDE.md`
+  - report files such as:
+    - `docs/implementation-report.md`
+    - `docs/week-3-report.md`
+  - any `.log` files under the repository
+- README changes:
+  - replaced the previous temporary root README
+  - added a professional English project overview for H-Smart
+  - documented:
+    - microservices architecture
+    - tech stack
+    - current service ports:
+      - `8000`
+      - `8081`
+      - `8082`
+      - `8083`
+      - `8002`
+  - highlighted key features:
+    - Smart Naming
+    - JWT Gateway Validation
+    - WebSocket Chat
+- Technical note:
+  - `README.md` is intentionally not ignored and remains part of the repository-facing documentation.
+
+[2026-04-26] RabbitMQ product sold event notification flow added
+
+- Infrastructure changes:
+  - added `rabbitmq` service in `docker-compose.yml`
+  - container name: `h-smart-rabbitmq`
+  - image: `rabbitmq:3-management`
+  - AMQP port: `5672`
+  - management UI port: `15672`
+  - default credentials:
+    - username: `hsmart`
+    - password: `hsmart_password`
+  - added `rabbitmq-data` Docker volume
+  - added RabbitMQ healthcheck using `rabbitmq-diagnostics -q ping`
+  - wired `product-service` and `interaction-service` to depend on healthy RabbitMQ
+- `product-service` changes:
+  - added `spring-boot-starter-amqp`
+  - added `spring-retry`
+  - configured RabbitMQ connection and template retry settings
+  - added topic exchange `product.exchange`
+  - added `ProductSoldEvent` payload with:
+    - `productId`
+    - `sellerId`
+    - `title`
+  - added `ProductEventPublisher`
+  - `PUT /api/v1/products/{id}` now publishes `product.event.sold` only when product status transitions from non-`SOLD` to `SOLD`
+  - event publishing is registered after the database transaction commits
+  - RabbitMQ publish failures are logged in English after configured retry attempts
+- `interaction-service` changes:
+  - added `spring-boot-starter-amqp`
+  - added `spring-retry`
+  - configured RabbitMQ connection and listener retry settings
+  - added durable queue `product.sold.notification.queue`
+  - bound the queue to `product.exchange` with routing key `product.event.sold`
+  - added `ProductSoldEventListener`
+  - listener creates a MongoDB notification for `sellerId`
+  - notification type: `PRODUCT_SOLD`
+  - notification message format:
+    - `Congratulations! Your product [Title] has been marked as SOLD.`
+  - notification creation still uses the existing notification service, so WebSocket fan-out continues to use `/user/queue/notifications`
+- Documentation updates:
+  - updated `product-service/SERVICE-NOTES.md`
+  - updated `interaction-service/SERVICE-NOTES.md`
+- Verification:
+  - `docker compose config` passed and confirmed RabbitMQ service, ports, healthcheck, dependencies, and environment wiring
+  - `product-service`: `mvn -q test` passed
+  - `interaction-service`: `mvn -q test` passed
+  - product-service unit coverage confirms `ACTIVE` to `SOLD` emits `ProductSoldEvent`
+  - interaction-service unit coverage confirms RabbitMQ listener creates the expected seller notification content
+  - live Docker runtime smoke test was attempted but could not run because the Docker Desktop Linux engine pipe was unavailable in the current environment
+- Technical notes:
+  - runtime logs and notification content added in this change are in English
+  - retry is intentionally simple Spring AMQP retry, not a durable outbox implementation
+
+[2026-04-27] centralized observability stack added
+
+- Infrastructure changes:
+  - added Zipkin container:
+    - container name: `h-smart-zipkin`
+    - image: `openzipkin/zipkin:3`
+    - port: `9411`
+  - added Elasticsearch container:
+    - container name: `h-smart-elasticsearch`
+    - image: `docker.elastic.co/elasticsearch/elasticsearch:8.15.3`
+    - port: `9200`
+    - security disabled for local development
+    - data volume: `elasticsearch-data`
+  - added Logstash container:
+    - container name: `h-smart-logstash`
+    - image: `docker.elastic.co/logstash/logstash:8.15.3`
+    - TCP input port: `5044`
+    - pipeline file: `observability/logstash/logstash.conf`
+  - added Kibana container:
+    - container name: `h-smart-kibana`
+    - image: `docker.elastic.co/kibana/kibana:8.15.3`
+    - port: `5601`
+- Logstash pipeline:
+  - TCP input listens on `5044`
+  - codec: `json_lines`
+  - Elasticsearch index pattern: `hsmart-logs-%{+YYYY.MM.dd}`
+- Spring Boot service changes:
+  - services updated:
+    - `api-gateway`
+    - `user-service`
+    - `product-service`
+    - `interaction-service`
+  - added `spring-boot-starter-actuator`
+  - added `micrometer-tracing-bridge-brave`
+  - added `zipkin-reporter-brave`
+  - added `logstash-logback-encoder`
+  - configured `management.tracing.sampling.probability=1.0`
+  - configured Zipkin endpoint:
+    - local default: `http://localhost:9411/api/v2/spans`
+    - Docker value: `http://zipkin:9411/api/v2/spans`
+  - configured Logstash destination:
+    - local default: `localhost:5044`
+    - Docker value: `logstash:5044`
+- Logging changes:
+  - added `logback-spring.xml` to each updated Spring Boot service
+  - console logs now include `traceId` and `spanId`
+  - Logstash appender sends JSON logs over TCP
+  - JSON logs include:
+    - `service`
+    - `environment`
+    - `level`
+    - `logger`
+    - `thread`
+    - `traceId`
+    - `spanId`
+    - `message`
+  - runtime log messages remain in English
+- Documentation updates:
+  - updated `api-gateway/SERVICE-NOTES.md`
+  - updated `user-service/SERVICE-NOTES.md`
+  - updated `product-service/SERVICE-NOTES.md`
+  - updated `interaction-service/SERVICE-NOTES.md`
+  - added dashboard access notes for:
+    - Zipkin: `http://localhost:9411`
+    - Kibana: `http://localhost:5601`
+    - Elasticsearch: `http://localhost:9200`
+  - documented Kibana data view pattern:
+    - `hsmart-logs-*`
+- Verification:
+  - `api-gateway`: `mvn -q test` passed
+  - `user-service`: `mvn -q test` passed
+  - `product-service`: `mvn -q test` passed
+  - `interaction-service`: `mvn -q test` passed
+  - `docker compose config --quiet` passed
+  - test logs confirmed Micrometer trace correlation is available in log output for instrumented web requests
+  - Docker Desktop was started and runtime verification was completed
+  - `docker compose up -d --no-build` started the stack successfully after the full rebuild hit Docker memory pressure while rebuilding `ai-service`
+  - Zipkin health endpoint returned `UP`
+  - Elasticsearch cluster health returned `green`
+  - Gateway health endpoint returned `200`
+  - verified gateway request:
+    - `POST http://localhost:8000/api/v1/auth/register`
+    - response status: `201`
+  - verified Zipkin trace:
+    - trace id: `69eef967827daba552e6c55045ec9834`
+    - services: `api-gateway`, `user-service`
+    - span count: `7`
+    - span names included:
+      - `http post /api/v1/auth/register`
+      - `http post`
+      - `authorize request`
+      - `secured request`
+  - verified Elasticsearch logging:
+    - index: `hsmart-logs-2026.04.27`
+    - log search by trace id `69eef967827daba552e6c55045ec9834` returned gateway request and response logs
+    - both logs included non-empty `traceId` and `spanId`
+- Follow-up adjustment made during runtime verification:
+  - updated `api-gateway` request logging to populate MDC from Micrometer `Tracer`
+  - added `io.micrometer:context-propagation` to `api-gateway`
+  - enabled `spring.reactor.context-propagation=auto`
+  - rebuilt and restarted `api-gateway`
+  - reran `api-gateway`: `mvn -q test` passed
+- Operational note:
+  - full `docker compose up -d --build` can exceed the current Docker memory allocation while rebuilding `ai-service`
+  - `docker compose up -d --no-build` successfully starts the stack using the already available `ai-service` image
+
+[2026-05-02] context-aware text assistant added to interaction-service
+
+- Scope:
+  - added a text assistant module inside `interaction-service`
+  - existing image AI services remain unchanged
+- Assistant runtime:
+  - endpoint: `POST /api/v1/assistant/chat`
+  - model: `qwen3:4b-instruct`
+  - Ollama base URL: `http://host.docker.internal:11434`
+  - Spring client: `RestClient`
+  - default history limit: `10`
+  - assistant id in MongoDB: `h-smart-assistant`
+- Prompting:
+  - default system prompt:
+    - `You are H-Smart Assistant, a friendly and witty expert in second-hand household appliances. You help users at Ho Chi Minh City University of Technology (HCMUT) marketplace. Always answer in Vietnamese unless requested otherwise.`
+  - prompt sent to Ollama includes:
+    - system message
+    - recent assistant conversation history for the current user
+    - latest user message
+- Persistence:
+  - assistant conversation turns are stored in MongoDB collection `chat_messages`
+  - user question:
+    - `senderId = <userId>`
+    - `receiverId = h-smart-assistant`
+  - assistant answer:
+    - `senderId = h-smart-assistant`
+    - `receiverId = <userId>`
+- Gateway integration:
+  - added gateway route:
+    - `/api/v1/assistant/**` -> `interaction-service`
+  - gateway JWT validation forwards `X-User-Id` to the assistant endpoint
+  - gateway downstream response timeout is configurable through `GATEWAY_RESPONSE_TIMEOUT`
+  - Docker development timeout is `120s` so Ollama-backed assistant requests are not cut off while the model is generating
+- Observability:
+  - assistant flow logs processing start, loaded history count, persistence, total duration, and AI response time
+  - logs are in English
+  - Micrometer trace id is included in service logs when a tracing span is available
+  - existing Zipkin and Logstash/ELK configuration applies to assistant chat requests
+- Documentation:
+  - updated `interaction-service/SERVICE-NOTES.md`
+  - added direct `8083` curl example
+  - added gateway `8000` curl example
+  - added MongoDB, Zipkin, and Kibana verification notes
+- Verification:
+  - local Ollama API is reachable on `http://localhost:11434`
+  - local Ollama model list includes `qwen3:4b-instruct`
+  - `interaction-service`: `mvn -q test` passed
+  - `api-gateway`: `mvn -q test` passed
+  - `docker compose config --quiet` passed
+  - Docker Desktop was started and runtime verification was completed
+  - started Docker services:
+    - `interaction-mongo-db`
+    - `rabbitmq`
+    - `zipkin`
+    - `elasticsearch`
+    - `logstash`
+    - `kibana`
+    - `interaction-service`
+    - `api-gateway`
+  - direct service request passed:
+    - `POST http://localhost:8083/api/v1/assistant/chat`
+    - header: `X-User-Id: assistant-smoke-user`
+    - response status: `200`
+    - second request remembered the earlier `used washing machine` discussion from MongoDB-backed history
+  - gateway request passed:
+    - `POST http://localhost:8000/api/v1/assistant/chat`
+    - response status: `200`
+    - assistant response remembered that the user was looking for a used washing machine
+  - verified Zipkin trace:
+    - trace id: `69f5b049592f2629b63ed0ca200d7698`
+    - services: `api-gateway`, `interaction-service`
+    - span count: `4`
+  - verified Elasticsearch log correlation:
+    - index: `hsmart-logs-2026.05.02`
+    - trace id: `69f5b049592f2629b63ed0ca200d7698`
+    - logs include gateway request, assistant history load, MongoDB persistence, AI response timing, and gateway response
+
+[2026-05-03] Redis-backed assistant rate limiting added to api-gateway
+
+- Scope:
+  - protected `POST /api/v1/assistant/chat` and the `/api/v1/assistant/**` route family at `api-gateway`
+  - `interaction-service` assistant logic is unchanged
+- Infrastructure:
+  - added Redis container:
+    - service name: `redis`
+    - container name: `h-smart-redis`
+    - image: `redis:7-alpine`
+    - port: `6379`
+    - healthcheck: `redis-cli ping`
+  - `api-gateway` now depends on healthy Redis in Docker Compose
+- Gateway dependencies:
+  - added `spring-boot-starter-data-redis-reactive`
+- Gateway configuration:
+  - Redis host: `SPRING_DATA_REDIS_HOST`
+  - Redis port: `SPRING_DATA_REDIS_PORT`
+  - assistant route uses Spring Cloud Gateway `RequestRateLimiter`
+  - rate limiter bean: `assistantRedisRateLimiter`
+  - key resolver bean: `userOrIpKeyResolver`
+- Rate-limit identity:
+  - primary key: `X-User-Id`
+  - fallback key: client IP address
+- Limits:
+  - `ASSISTANT_RATE_LIMIT_REPLENISH_RATE=5`
+  - `ASSISTANT_RATE_LIMIT_BURST_CAPACITY=10`
+  - `ASSISTANT_RATE_LIMIT_REFILL_PERIOD_SECONDS=60`
+  - behavior: up to `10` burst requests, replenished at `5` requests per minute
+- Response handling:
+  - blocked requests return `429 Too Many Requests`
+  - response body follows `ApiResponse<Void>`
+  - message: `Too many AI requests. Please wait a moment before trying again.`
+- Observability:
+  - blocked requests are logged in English by `RateLimitResponseFilter`
+  - logs include the current Micrometer trace id when available
+  - gateway-handled `429` requests remain visible in Zipkin
+- Documentation:
+  - updated `api-gateway/api-gateway-notes.md`
+  - updated `project-log.md`
+- Verification:
+  - `api-gateway`: `mvn -q test` passed
+  - `docker compose config --quiet` passed
+  - unit tests cover:
+    - `X-User-Id` key resolution
+    - IP fallback key resolution
+    - standard `429` `ApiResponse` formatting
+  - Docker runtime verification passed:
+    - Redis container `h-smart-redis` started healthy
+    - rebuilt `api-gateway` with Redis reactive dependency
+    - prefilled Redis token bucket for user `assistant-rate-test-user` to force a blocked request
+    - request: `POST http://localhost:8000/api/v1/assistant/chat`
+    - response status: `429`
+    - response body: `{"status":429,"message":"Too many AI requests. Please wait a moment before trying again.","data":null}`
+  - verified Zipkin trace for the blocked request:
+    - trace id: `69f731e84c5441c6060547309057ef97`
+    - service: `api-gateway`
+    - status tag: `429`
+  - verified Elasticsearch log correlation:
+    - index: `hsmart-logs-2026.05.03`
+    - trace id: `69f731e84c5441c6060547309057ef97`
+    - logs include incoming request, rate-limit warning, and outgoing `429` response
+
+[2026-05-03] product-aware RAG added to AI Assistant
+
+- Scope:
+  - assistant in `interaction-service` can answer with live product data from `product-service`
+  - existing Ollama model remains `qwen3:4b-instruct`
+  - gateway timeout remains configurable through `GATEWAY_RESPONSE_TIMEOUT` with Docker development value `120s`
+- Inter-service communication:
+  - added `ProductClient` in `interaction-service`
+  - implementation: `ProductServiceClient`
+  - HTTP client: Spring Boot `RestClient`
+  - default product-service URL: `http://product-service:8082`
+  - timeout configuration:
+    - `PRODUCT_SERVICE_CONNECT_TIMEOUT_MS=2000`
+    - `PRODUCT_SERVICE_READ_TIMEOUT_MS=3000`
+  - Docker environment added for `interaction-service`:
+    - `PRODUCT_SERVICE_BASE_URL`
+    - `PRODUCT_SERVICE_PAGE_SIZE`
+    - `PRODUCT_SERVICE_CONNECT_TIMEOUT_MS`
+    - `PRODUCT_SERVICE_READ_TIMEOUT_MS`
+- Product-service search support:
+  - `GET /api/v1/products` now accepts optional search parameters:
+    - `keyword`
+    - `status`
+    - `categoryId`
+    - pageable params such as `page`, `size`, and `sort`
+  - RAG client calls with:
+    - `keyword=<detected keyword>`
+    - `status=ACTIVE`
+    - `page=0`
+    - `size=30`
+    - `sort=id,desc`
+- RAG logic:
+  - added `ProductKeywordExtractor`
+  - detects product category keywords including `máy giặt`, `tủ lạnh`, `ghế`, `bàn`, `sofa`, `điều hòa`, `quạt`, `nồi cơm`, `bếp`, `tivi`, `lò vi sóng`, `giường`, and `kệ`
+  - matching product data is formatted with title, price, short description, seller id, category, and location fallback
+  - product context is appended to the Ollama system prompt:
+    - `Dưới đây là dữ liệu thực tế từ kho hàng H-Smart: [Dữ liệu sản phẩm]. Hãy sử dụng thông tin này để trả lời người dùng một cách chính xác nhất.`
+- Fallback behavior:
+  - if `product-service` is unavailable, assistant still answers using general knowledge
+  - English warning log is written for product catalog retrieval failure
+  - user answer is prefixed in Vietnamese:
+    - `Hiện tại tôi không thể truy cập dữ liệu thời gian thực, đây là thông tin tham khảo...`
+- Observability:
+  - RestClient is built from Spring's `RestClient.Builder`, so trace context propagates to `product-service`
+  - product keyword detection and product retrieval counts are logged with trace id
+- Documentation:
+  - updated `interaction-service/interaction-service-notes.md`
+  - updated `project-log.md`
+- Verification:
+  - `interaction-service`: `mvn -q test` passed
+  - `product-service`: `mvn -q test` passed
+  - `docker compose config --quiet` passed
+  - Docker runtime RAG smoke test passed:
+    - seeded an ACTIVE washer product in `product-service` database
+    - request: `POST http://localhost:8000/api/v1/assistant/chat`
+    - prompt: `H-Smart hien co may giat nao phu hop phong tro khong?`
+    - response status: `200`
+    - assistant answer referenced the live product data
+  - verified Zipkin trace:
+    - trace id: `69f73b39e07f41301563259afb154a95`
+    - services: `api-gateway`, `interaction-service`, `product-service`
+    - product-service span: `GET /api/v1/products`
+    - interaction-service also emitted the Ollama client span
+  - verified Elasticsearch log correlation:
+    - trace id: `69f73b39e07f41301563259afb154a95`
+    - logs include keyword detection and product catalog count
+  - Docker runtime fallback smoke test passed:
+    - product-service was temporarily stopped
+    - assistant request still returned `200`
+    - response included the required realtime-unavailable Vietnamese prefix

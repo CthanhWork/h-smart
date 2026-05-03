@@ -7,6 +7,7 @@ import com.hsmart.backend.application.dto.PageResponseDTO;
 import com.hsmart.backend.application.dto.PredictResponseDTO;
 import com.hsmart.backend.application.dto.ProductRequestDTO;
 import com.hsmart.backend.application.dto.ProductResponseDTO;
+import com.hsmart.backend.application.dto.ProductSoldEvent;
 import com.hsmart.backend.application.exceptions.CategoryNotFoundException;
 import com.hsmart.backend.application.exceptions.FileProcessingException;
 import com.hsmart.backend.application.exceptions.MissingUserContextException;
@@ -20,6 +21,7 @@ import com.hsmart.backend.domain.entities.ProductStatus;
 import com.hsmart.backend.infrastructure.config.ApplicationProperties;
 import com.hsmart.backend.infrastructure.config.StorageProperties;
 import com.hsmart.backend.infrastructure.context.UserContextHolder;
+import com.hsmart.backend.infrastructure.messaging.ProductEventPublisher;
 import com.hsmart.backend.infrastructure.persistence.CategoryRepository;
 import com.hsmart.backend.infrastructure.persistence.ProductRepository;
 import com.hsmart.backend.service.ProductService;
@@ -39,6 +41,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
 
@@ -56,6 +60,7 @@ public class ProductServiceImpl implements ProductService {
     private final ApplicationProperties applicationProperties;
     private final ProductMapper productMapper;
     private final ProductNamingSupport productNamingSupport;
+    private final ProductEventPublisher productEventPublisher;
 
     @Override
     public ProductResponseDTO createProduct(ProductRequestDTO request, MultipartFile image) throws IOException {
@@ -89,6 +94,7 @@ public class ProductServiceImpl implements ProductService {
         String currentUserId = getCurrentUserId();
         Product product = getActiveProduct(id);
         validateOwnership(product, currentUserId);
+        ProductStatus previousStatus = product.getStatus();
 
         Category category = resolveCategory(request.getCategoryId());
         product.setTitle(resolveUpdatedTitle(product, request));
@@ -98,6 +104,9 @@ public class ProductServiceImpl implements ProductService {
         product.setCategory(category);
 
         Product savedProduct = productRepository.save(product);
+        if (isTransitionToSold(previousStatus, savedProduct.getStatus())) {
+            publishProductSoldAfterCommit(savedProduct);
+        }
         log.info("Updated product {} for seller {}", savedProduct.getId(), savedProduct.getSellerId());
         return toProductResponse(savedProduct);
     }
@@ -115,8 +124,13 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     @Transactional(readOnly = true)
-    public PageResponseDTO<ProductResponseDTO> getAllProducts(Pageable pageable) {
-        Page<ProductResponseDTO> page = productRepository.findAllByIsDeletedFalse(pageable)
+    public PageResponseDTO<ProductResponseDTO> getAllProducts(
+            String keyword,
+            ProductStatus status,
+            Long categoryId,
+            Pageable pageable
+    ) {
+        Page<ProductResponseDTO> page = productRepository.searchProducts(normalizeKeyword(keyword), status, categoryId, pageable)
                 .map(this::toProductResponse);
         return PageResponseDTO.from(page);
     }
@@ -131,6 +145,13 @@ public class ProductServiceImpl implements ProductService {
     private String getCurrentUserId() {
         return UserContextHolder.getCurrentUserId()
                 .orElseThrow(MissingUserContextException::new);
+    }
+
+    private String normalizeKeyword(String keyword) {
+        if (!StringUtils.hasText(keyword)) {
+            return null;
+        }
+        return keyword.trim();
     }
 
     private Product getActiveProduct(Long id) {
@@ -149,6 +170,30 @@ public class ProductServiceImpl implements ProductService {
             return request.getTitle().trim();
         }
         return product.getTitle();
+    }
+
+    private boolean isTransitionToSold(ProductStatus previousStatus, ProductStatus currentStatus) {
+        return previousStatus != ProductStatus.SOLD && currentStatus == ProductStatus.SOLD;
+    }
+
+    private void publishProductSoldAfterCommit(Product product) {
+        ProductSoldEvent event = ProductSoldEvent.builder()
+                .productId(product.getId())
+                .sellerId(product.getSellerId())
+                .title(product.getTitle())
+                .build();
+
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            productEventPublisher.publishProductSold(event);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                productEventPublisher.publishProductSold(event);
+            }
+        });
     }
 
     private Category resolveCategory(Long categoryId) {

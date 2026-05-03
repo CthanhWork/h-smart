@@ -1,6 +1,7 @@
 package com.hsmart.backend.infrastructure.exception;
 
 import com.hsmart.backend.application.dto.ApiResponse;
+import com.hsmart.backend.application.exceptions.AssistantServiceUnavailableException;
 import com.hsmart.backend.application.exceptions.InvalidInteractionRequestException;
 import com.hsmart.backend.application.exceptions.MissingUserContextException;
 import org.springframework.http.HttpStatus;
@@ -25,6 +26,12 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleInvalidRequest(InvalidInteractionRequestException exception) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ApiResponse.error(HttpStatus.BAD_REQUEST, exception.getMessage()));
+    }
+
+    @ExceptionHandler(AssistantServiceUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAssistantUnavailable(AssistantServiceUnavailableException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

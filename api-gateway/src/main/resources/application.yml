@@ -4,13 +4,19 @@ server:
 spring:
   application:
     name: api-gateway
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+  reactor:
+    context-propagation: auto
   cloud:
     gateway:
       default-filters:
         - AuthenticationFilter
       httpclient:
         connect-timeout: 2000
-        response-timeout: 5s
+        response-timeout: ${GATEWAY_RESPONSE_TIMEOUT:120s}
       routes:
         - id: user-auth-route
           uri: ${USER_SERVICE_URL:http://user-service:8081}
@@ -32,10 +38,34 @@ spring:
           uri: ${INTERACTION_SERVICE_URL:http://interaction-service:8083}
           predicates:
             - Path=/api/v1/interactions/**
+        - id: assistant-route
+          uri: ${INTERACTION_SERVICE_URL:http://interaction-service:8083}
+          predicates:
+            - Path=/api/v1/assistant/**
+          filters:
+            - name: RequestRateLimiter
+              args:
+                rate-limiter: "#{@assistantRedisRateLimiter}"
+                key-resolver: "#{@userOrIpKeyResolver}"
+                status-code: TOO_MANY_REQUESTS
+                assistant-redis-rate-limiter.replenishRate: ${ASSISTANT_RATE_LIMIT_REPLENISH_RATE:5}
+                assistant-redis-rate-limiter.burstCapacity: ${ASSISTANT_RATE_LIMIT_BURST_CAPACITY:10}
+                assistant-redis-rate-limiter.refillPeriodSeconds: ${ASSISTANT_RATE_LIMIT_REFILL_PERIOD_SECONDS:60}
 
 logging:
+  logstash:
+    host: ${LOGSTASH_HOST:localhost}
+    port: ${LOGSTASH_PORT:5044}
   level:
     com.hsmart.gateway: INFO
+
+management:
+  tracing:
+    sampling:
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
+  zipkin:
+    tracing:
+      endpoint: ${MANAGEMENT_ZIPKIN_TRACING_ENDPOINT:http://localhost:9411/api/v2/spans}
 
 app:
   jwt:

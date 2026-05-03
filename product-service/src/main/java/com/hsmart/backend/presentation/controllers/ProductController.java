@@ -4,6 +4,7 @@ import com.hsmart.backend.application.dto.ApiResponse;
 import com.hsmart.backend.application.dto.PageResponseDTO;
 import com.hsmart.backend.application.dto.ProductRequestDTO;
 import com.hsmart.backend.application.dto.ProductResponseDTO;
+import com.hsmart.backend.domain.entities.ProductStatus;
 import com.hsmart.backend.service.ProductService;
 import jakarta.validation.Valid;
 import java.io.IOException;
@@ -23,6 +24,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestPart;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 import org.springframework.web.server.ResponseStatusException;
@@ -65,11 +67,15 @@ public class ProductController {
 
     @GetMapping
     public ResponseEntity<ApiResponse<PageResponseDTO<ProductResponseDTO>>> getAllProducts(
+            @RequestParam(required = false) String keyword,
+            @RequestParam(required = false) ProductStatus status,
+            @RequestParam(required = false) Long categoryId,
             @ParameterObject
             @PageableDefault(sort = "id", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         return ResponseEntity.ok(
-                ApiResponse.success(HttpStatus.OK, "Products fetched successfully", productService.getAllProducts(pageable))
+                ApiResponse.success(HttpStatus.OK, "Products fetched successfully",
+                        productService.getAllProducts(keyword, status, categoryId, pageable))
         );
     }
 
