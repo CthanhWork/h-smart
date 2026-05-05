@@ -13,6 +13,8 @@ Current responsibilities:
 - validate JWT before forwarding protected requests
 - forward authenticated user identity to downstream services
 - rate-limit AI assistant requests per user through Redis
+- discover Spring Boot services through Eureka and route to them with Spring Cloud LoadBalancer
+- attach the internal shared-secret header to trusted downstream service requests
 
 ## Runtime
 
@@ -24,26 +26,90 @@ Current responsibilities:
 
 ## Routes
 
-- `/api/v1/auth/**` -> `user-service`
-- `/api/v1/users/**` -> `user-service`
-- `/api/v1/products/**` -> `product-service`
-- `/api/v1/assistant/**` -> `interaction-service`
-- `/api/v1/interactions/**` -> `interaction-service`
-- `/api/v1/interactions/ws/**` -> `interaction-service` over WebSocket
+- `/api/v1/auth/**` -> `lb://user-service`
+- `/api/v1/users/**` -> `lb://user-service`
+- `/api/v1/products/**` -> `lb://product-service`
+- `/api/v1/search/**` -> `lb://search-service`
+- `/api/v1/orders/**` -> `lb://order-service`
+- `/api/v1/reviews/**` -> `lb://review-service`
+- `/api/v1/predict/**` -> `ai-service`
+- `/api/v1/assistant/**` -> `lb://interaction-service`
+- `/api/v1/interactions/**` -> `lb://interaction-service`
+- `/api/v1/interactions/ws/**` -> `lb:ws://interaction-service`
 
-Downstream base URL is configured via:
+Spring Boot service routes are resolved through Eureka and Spring Cloud LoadBalancer.
 
-- `USER_SERVICE_URL`
-- `PRODUCT_SERVICE_URL`
-- `INTERACTION_SERVICE_URL`
-- `INTERACTION_SERVICE_WS_URL`
+Static downstream URLs were removed for:
 
-Default value:
+- `user-service`
+- `product-service`
+- `interaction-service`
+- `search-service`
+- `order-service`
+- `review-service`
 
-- `http://user-service:8081`
-- `http://product-service:8082`
-- `http://interaction-service:8083`
-- `ws://interaction-service:8083`
+The prediction route still uses `AI_SERVICE_URL` because `ai-service` is not currently a Spring Boot Eureka client.
+
+Default prediction route value:
+
+- `http://ai-service:8000`
+
+## Service Discovery
+
+The gateway registers itself with Eureka and fetches the service registry for load-balanced routes.
+
+Eureka Dashboard:
+
+- `http://localhost:8761`
+
+Docker default zone:
+
+- `EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-server:8761/eureka/`
+
+Expected gateway registry entry:
+
+- service ID: `api-gateway`
+- instance ID: `api-gateway:8000`
+
+Expected downstream service IDs:
+
+- `user-service`
+- `product-service`
+- `interaction-service`
+- `search-service`
+- `order-service`
+- `review-service`
+
+Circuit breaker filters remain attached to the gateway routes after switching to `lb://` URIs:
+
+- `assistantCircuitBreaker` protects `lb://interaction-service`
+- `searchCircuitBreaker` protects `lb://search-service`
+- `predictCircuitBreaker` still protects the static `AI_SERVICE_URL` route
+
+## Internal Service Authentication
+
+The gateway is the trust boundary for Spring Boot services behind H-Smart.
+
+Internal forwarding behavior:
+
+- global filter: `InternalSecretForwardingFilter`
+- header added to internal service routes: `X-Internal-Secret`
+- secret source: `INTERNAL_SHARED_SECRET`
+- the filter strips any incoming client-provided `X-Internal-Secret`
+- the filter sets the configured secret only for `lb://` and `lb:ws://` routes
+- `AI_SERVICE_URL` is not treated as a Spring Boot internal route by this filter
+
+Secret handling:
+
+- the secret is not hardcoded in `application.yml`
+- Docker Compose reads it from the host environment or a gitignored `.env` file
+- recommended local setup:
+
+```bash
+INTERNAL_SHARED_SECRET=<long-random-uuid-or-secret>
+```
+
+Valid downstream requests keep the existing trace context and any gateway-authenticated `X-User-Id`.
 
 HTTP client timeout:
 
@@ -58,6 +124,7 @@ Redis:
 - Port: `6379`
 - Gateway Redis host: `SPRING_DATA_REDIS_HOST`
 - Gateway Redis port: `SPRING_DATA_REDIS_PORT`
+- Internal shared secret: `INTERNAL_SHARED_SECRET`
 
 ## Error policy
 
@@ -104,6 +171,8 @@ Current behavior:
 - skips JWT validation for:
   - `/api/v1/auth/**`
   - `/api/v1/products/media/**`
+  - `/api/v1/search/**`
+  - `GET /api/v1/reviews/**`
   - `/health`
   - `/v3/api-docs/**`
   - `/swagger-ui/**`
@@ -162,6 +231,41 @@ filters:
       assistant-redis-rate-limiter.refillPeriodSeconds: 60
 ```
 
+## Circuit Breakers
+
+The gateway uses Spring Cloud CircuitBreaker with Reactor Resilience4j for sensitive downstream routes.
+
+Protected route breakers:
+
+- `/api/v1/assistant/**` -> `assistantCircuitBreaker`
+- `/api/v1/search/**` -> `searchCircuitBreaker`
+- `/api/v1/predict/**` -> `predictCircuitBreaker`
+
+Shared breaker settings:
+
+- `failure-rate-threshold=50`
+- `slow-call-duration-threshold=10s`
+- `slow-call-rate-threshold=50`
+- `sliding-window-size=10`
+- `minimum-number-of-calls=5`
+- `wait-duration-in-open-state=30s`
+- `permitted-number-of-calls-in-half-open-state=3`
+- automatic transition from `OPEN` to `HALF_OPEN` is enabled
+
+Fallback responses:
+
+- search fallback returns an empty product page with message `Search service is busy, please try again later.`
+- assistant fallback returns `Assistant is currently resting, will be back soon!`
+- prediction fallback returns `Prediction service is busy, please try again later.`
+
+Observability behavior:
+
+- fallback handlers tag the active Zipkin span with `resilience4j.circuit_breaker.name`
+- fallback handlers tag the active Zipkin span with `resilience4j.fallback=true`
+- `CircuitBreakerEventLogger` logs state transitions such as `CLOSED -> OPEN` and `OPEN -> HALF_OPEN`
+- logs are sent to Logstash and include `traceId` and `spanId`
+- circuit breaker health and metrics are exposed through actuator health/metrics endpoints
+
 ## Logging
 
 The gateway logs:
@@ -177,6 +281,7 @@ Runtime observability is configured for the Docker development stack.
 
 Dashboards:
 
+- Eureka: `http://localhost:8761`
 - Zipkin: `http://localhost:9411`
 - Kibana: `http://localhost:5601`
 - Elasticsearch API: `http://localhost:9200`
@@ -221,6 +326,9 @@ Current runtime verification status:
 - AI assistant rate-limit implementation is covered by unit tests for:
   - `X-User-Id` and IP key resolution
   - standard `ApiResponse` body for `429 Too Many Requests`
+- Circuit breaker fallback implementation is covered by unit tests for:
+  - search fallback empty product page
+  - assistant fallback message
 - Verified assistant rate-limit block through gateway:
   - request: `POST http://localhost:8000/api/v1/assistant/chat`
   - response status: `429`
@@ -229,6 +337,29 @@ Current runtime verification status:
   - Zipkin service: `api-gateway`
   - Elasticsearch index: `hsmart-logs-2026.05.03`
   - logs include incoming request, `Rate limited AI request...`, and outgoing `429` response with the same `traceId`
+- Verified public search request through gateway:
+  - request: `GET http://localhost:8000/api/v1/search/products?q=electrolux&page=0&size=10`
+  - response status: `200`
+  - trace id: `69f7435d7aa085f7d936a52aebb87ace`
+  - Zipkin services: `api-gateway`, `search-service`
+  - Elasticsearch index: `hsmart-logs-2026.05.03`
+  - logs include gateway request, search-service query timing, and gateway response with the same `traceId`
+- Verified Eureka load-balanced search request through gateway:
+  - request: `GET http://localhost:8000/api/v1/search/products?q=electrolux&page=0&size=5`
+  - response status: `200`
+  - gateway route URI in Zipkin: `lb://search-service`
+  - trace id: `69f7938a4ec99cfcd7530f5ed1fe5e9e`
+  - Zipkin services: `api-gateway`, `search-service`
+  - gateway and search-service logs contain the same `traceId`
+  - Elasticsearch index `hsmart-logs-2026.05.03` contains gateway request, search-service query timing, and gateway response logs for the same `traceId`
+- Verified internal shared-secret forwarding:
+  - direct request to `http://localhost:8084/health` without `X-Internal-Secret` returned `401`
+  - gateway request to `GET /api/v1/search/products` returned `200`
+  - trace id: `69f79c13b96a42034093e1595430b594`
+  - Zipkin services: `api-gateway`, `search-service`
+  - gateway route URI in Zipkin: `lb://search-service`
+  - valid request logs kept the same `traceId` across gateway and search-service
+  - rejected direct request logs were stored in Elasticsearch with source IP and trace id `69f79be22317ec68e8de9d4b7287ca95`
 
 ## CORS
 
@@ -254,8 +385,18 @@ Verified:
   - `/api/v1/products/**` is routed to `product-service`
 - `/api/v1/assistant/**` is routed to `interaction-service` and live assistant chat returns `200`
 - `/api/v1/assistant/**` returns gateway-level `429` when Redis rate limit is exceeded
-  - `/api/v1/interactions/**` is routed to `interaction-service`
-  - `/api/v1/interactions/ws/**` is routed to `interaction-service` as WebSocket traffic
+- `/api/v1/search/**` is routed to `search-service` and remains publicly accessible without JWT
+- `/api/v1/search/**` is routed through Eureka LoadBalancer as `lb://search-service`
+- `/api/v1/orders/**` is routed through Eureka LoadBalancer as `lb://order-service` and requires JWT authentication
+- unauthenticated `POST /api/v1/orders` returns gateway-level `401 Unauthorized`
+- `/api/v1/reviews/**` is routed through Eureka LoadBalancer as `lb://review-service`
+- `GET /api/v1/reviews/**` is public
+- `POST /api/v1/reviews` requires JWT authentication
+- Eureka registry contains `API-GATEWAY`, `USER-SERVICE`, `PRODUCT-SERVICE`, `INTERACTION-SERVICE`, and `SEARCH-SERVICE` as `UP`
+- internal routes receive `X-Internal-Secret` from the gateway
+- `/api/v1/predict/**` is routed to `ai-service` with circuit breaker fallback
+- `/api/v1/interactions/**` is routed to `interaction-service`
+- `/api/v1/interactions/ws/**` is routed to `interaction-service` as WebSocket traffic
 - JWT filter pass:
   - protected route without token returns `401` with message `Invalid or missing security token`
   - protected route with valid token returns downstream `200`

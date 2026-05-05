@@ -33,10 +33,39 @@ assistant:
   system-prompt: ${ASSISTANT_SYSTEM_PROMPT:You are H-Smart Assistant, a friendly and witty expert in second-hand household appliances. You help users at Ho Chi Minh City University of Technology (HCMUT) marketplace. Always answer in Vietnamese unless requested otherwise.}
 
 product-service:
-  base-url: ${PRODUCT_SERVICE_BASE_URL:http://product-service:8082}
+  base-url: ${PRODUCT_SERVICE_BASE_URL:http://product-service}
   page-size: ${PRODUCT_SERVICE_PAGE_SIZE:30}
   connect-timeout-ms: ${PRODUCT_SERVICE_CONNECT_TIMEOUT_MS:2000}
   read-timeout-ms: ${PRODUCT_SERVICE_READ_TIMEOUT_MS:3000}
+
+internal:
+  security:
+    enabled: ${INTERNAL_SECURITY_ENABLED:true}
+    secret: ${INTERNAL_SHARED_SECRET:}
+
+resilience4j:
+  circuitbreaker:
+    instances:
+      productCatalogCircuitBreaker:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        slow-call-duration-threshold: 10s
+        slow-call-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://discovery-server:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${server.port}
 
 logging:
   logstash:
@@ -46,6 +75,13 @@ logging:
     com.hsmart.backend: INFO
 
 management:
+  health:
+    circuitbreakers:
+      enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
   tracing:
     sampling:
       probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}

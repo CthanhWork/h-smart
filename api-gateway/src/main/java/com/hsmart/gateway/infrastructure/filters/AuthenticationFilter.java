@@ -31,10 +31,14 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
     private static final List<String> PUBLIC_PATHS = List.of(
             "/api/v1/auth/**",
             "/api/v1/products/media/**",
+            "/api/v1/search/**",
             "/health",
             "/v3/api-docs/**",
             "/swagger-ui/**",
             "/swagger-ui.html"
+    );
+    private static final List<String> PUBLIC_GET_PATHS = List.of(
+            "/api/v1/reviews/**"
     );
 
     private final JwtService jwtService;
@@ -93,7 +97,9 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
             return true;
         }
 
-        return PUBLIC_PATHS.stream().anyMatch(pattern -> pathMatcher.match(pattern, path));
+        return PUBLIC_PATHS.stream().anyMatch(pattern -> pathMatcher.match(pattern, path))
+                || (HttpMethod.GET.equals(exchange.getRequest().getMethod())
+                && PUBLIC_GET_PATHS.stream().anyMatch(pattern -> pathMatcher.match(pattern, path)));
     }
 
     private String resolveAuthorizationHeader(ServerWebExchange exchange, String path) {

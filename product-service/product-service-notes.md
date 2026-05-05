@@ -15,6 +15,7 @@ Current business scope:
 - AI metadata persistence returned from `ai-service`
 - ownership validation based on `X-User-Id` forwarded by `api-gateway`
 - asynchronous product lifecycle events through RabbitMQ
+- asynchronous order completion consumption through RabbitMQ
 
 This service does not validate JWT tokens directly. Authentication is handled by `api-gateway`. `product-service` trusts the forwarded identity header after the gateway has validated the token.
 
@@ -26,6 +27,7 @@ This service does not validate JWT tokens directly. Authentication is handled by
 - Database: `hsmart_product_db`
 - Database engine: PostgreSQL
 - Messaging: RabbitMQ
+- Discovery: Eureka Client
 - ORM: Spring Data JPA + Hibernate 6
 - API docs: `/swagger-ui.html`
 
@@ -159,6 +161,14 @@ Configured exchange:
 - type: topic
 - name: `product.exchange`
 
+Order completion input:
+
+- exchange: `order.exchange`
+- queue: `order.product.update.queue`
+- routing key: `order.event.completed`
+- payload fields:
+  - `productId`
+
 Published event:
 
 - event DTO: `ProductSoldEvent`
@@ -168,13 +178,33 @@ Published event:
   - `sellerId`
   - `title`
 
+Search synchronization events:
+
+- event DTO: `ProductSearchEvent`
+- routing keys:
+  - `product.event.created`
+  - `product.event.updated`
+- payload fields:
+  - `id`
+  - `title`
+  - `description`
+  - `price`
+  - `categoryName`
+  - `status`
+
 Publish behavior:
 
+- `POST /api/v1/products` publishes `product.event.created` after the database transaction commits
+- `PUT /api/v1/products/{id}` publishes `product.event.updated` after the database transaction commits
 - `PUT /api/v1/products/{id}` checks the previous product status before applying updates
 - an event is published only when the status transitions from a non-`SOLD` value to `SOLD`
 - the event is registered after the database transaction commits
 - RabbitMQ publishing uses JSON conversion and a simple retry policy
+- RabbitMQ listener processing uses a simple retry policy
 - if RabbitMQ is unavailable after retry attempts, the failure is logged in English and the product update remains committed
+- when `order.event.completed` is consumed, the product is marked as `SOLD`
+- duplicate order completion events for products that are already `SOLD` are skipped
+- order-driven product status changes publish `product.event.updated` for search sync and `product.event.sold` for seller notification
 
 ## Smart Naming
 
@@ -271,7 +301,9 @@ Responsibilities:
 - fetch product detail
 - update owned product
 - soft delete owned product
+- publish product create/update events for search indexing
 - publish `ProductSoldEvent` when an owned product is marked as `SOLD`
+- consume `OrderCompletedEvent` and mark the related product as `SOLD`
 
 ### `VisionService`
 
@@ -332,6 +364,7 @@ The assistant RAG flow in `interaction-service` uses this endpoint with `keyword
 - calls `ai-service`
 - persists AI metadata
 - generates fallback title when necessary
+- publishes `product.event.created` after commit for search indexing
 
 ### Read
 
@@ -346,6 +379,7 @@ The assistant RAG flow in `interaction-service` uses this endpoint with `keyword
 - validates ownership
 - updates mutable fields
 - refreshes `updatedAt`
+- publishes `product.event.updated` after commit for search indexing
 - publishes `product.event.sold` after commit when status changes to `SOLD`
 
 ### Delete
@@ -401,7 +435,22 @@ Examples:
 
 Gateway route:
 
-- `/api/v1/products/**` -> `product-service`
+- `/api/v1/products/**` -> `lb://product-service`
+
+Internal service authentication:
+
+- `product-service` requires `X-Internal-Secret` on every HTTP request
+- the configured value is read from `INTERNAL_SHARED_SECRET`
+- if the header is missing or invalid, `InternalSecurityFilter` returns `401 Unauthorized`
+- rejected requests are logged in English with the source IP
+- rejected logs are sent to Logstash/ELK with `traceId` and `spanId` when tracing is active
+- valid gateway requests keep `X-User-Id` for ownership checks
+- valid assistant RAG requests from `interaction-service` also include `X-Internal-Secret`
+
+Secret handling:
+
+- the secret is not hardcoded in `application.yml`
+- Docker Compose requires the secret from the host environment or a gitignored `.env` file
 
 Public route through gateway:
 
@@ -417,6 +466,26 @@ Protected routes through gateway:
 - product update
 - product delete
 
+Search integration:
+
+- product create/update events are consumed by `search-service`
+- `search-service` indexes product snapshots into Elasticsearch index `products_index`
+- public search is exposed through gateway route `/api/v1/search/**`
+
+Order integration:
+
+- `order-service` publishes `order.event.completed` after an order becomes `COMPLETED`
+- `product-service` consumes the event and updates the product status to `SOLD`
+- the resulting `product.event.sold` is consumed by `interaction-service` to create the seller notification
+
+Service discovery:
+
+- `product-service` registers with Eureka through `EUREKA_CLIENT_SERVICEURL_DEFAULTZONE`
+- Docker default zone: `http://discovery-server:8761/eureka/`
+- Eureka Dashboard: `http://localhost:8761`
+- registry service ID: `product-service`
+- registry instance ID: `product-service:8082`
+
 Observed behavior:
 
 - gateway validates JWT
@@ -430,6 +499,7 @@ Runtime observability is configured for the Docker development stack.
 
 Dashboards:
 
+- Eureka: `http://localhost:8761`
 - Zipkin: `http://localhost:9411`
 - Kibana: `http://localhost:5601`
 - Elasticsearch API: `http://localhost:9200`
@@ -461,6 +531,10 @@ Current runtime verification status:
   - services: `api-gateway`, `user-service`
   - span count: `7`
 - Product-service tracing and Logstash logging are configured with the same Micrometer and JSON logging stack for product routes.
+- Verified Eureka registration:
+  - service ID: `PRODUCT-SERVICE`
+  - instance: `product-service:8082`
+  - status: `UP`
 
 ## Verification Status
 
@@ -475,6 +549,21 @@ Verified business behavior through tests and implementation review:
 - ownership denial on update
 - soft delete for owned product
 - product sold event publication when status transitions to `SOLD`
+- product update search event publication through `product.event.updated`
+- Docker build passed after product search event producer updates
+- Docker runtime producer smoke test passed:
+  - `PUT /api/v1/products/5` with `X-User-Id: seller-bk-1` returned `200`
+  - product-service published `product.event.updated`
+  - search-service consumed the event and indexed product `5`
+  - Zipkin trace id: `69f7435a5517493e80c375eb3ed8f370`
+  - trace services: `product-service`, `rabbitmq`, `search-service`
+- Docker runtime order event smoke test passed:
+  - `order-service` completed order `1` for product `5`
+  - product-service consumed `order.event.completed` from `order.product.update.queue`
+  - product `5` changed to `SOLD`
+  - product-service published `product.event.updated` and `product.event.sold`
+  - trace id: `69f8290adb06113ee6510f5a84d57c5e`
+  - logs show the same trace id across `order-service` and `product-service`
 
 Observed log example:
 
@@ -490,10 +579,12 @@ Observed log example:
 - `AI_SERVICE_BASE_URL`
 - `APP_PUBLIC_BASE_URL`
 - `STORAGE_UPLOAD_DIR`
+- `INTERNAL_SHARED_SECRET`
 - `SPRING_RABBITMQ_HOST`
 - `SPRING_RABBITMQ_PORT`
 - `SPRING_RABBITMQ_USERNAME`
 - `SPRING_RABBITMQ_PASSWORD`
+- `EUREKA_CLIENT_SERVICEURL_DEFAULTZONE`
 - `MANAGEMENT_TRACING_SAMPLING_PROBABILITY`
 - `MANAGEMENT_ZIPKIN_TRACING_ENDPOINT`
 - `LOGSTASH_HOST`

@@ -960,4 +960,471 @@
   - Docker runtime fallback smoke test passed:
     - product-service was temporarily stopped
     - assistant request still returned `200`
-    - response included the required realtime-unavailable Vietnamese prefix
+  - response included the required realtime-unavailable Vietnamese prefix
+
+[2026-05-03] search-service added with Elasticsearch fuzzy product search
+
+- Scope:
+  - added a dedicated `search-service` for product discovery
+  - service port: `8084`
+  - stack: Spring Boot 3, Spring Data Elasticsearch, RabbitMQ, Micrometer Tracing, Logstash logging
+- Elasticsearch:
+  - connected to `http://h-smart-elasticsearch:9200`
+  - index name: `products_index`
+  - indexed fields:
+    - `id`
+    - `title`
+    - `description`
+    - `price`
+    - `categoryName`
+    - `status`
+  - configured analyzer `hsmart_text_analyzer` with `lowercase` and `asciifolding`
+  - fuzzy search uses Elasticsearch `multi_match` with `fuzziness=AUTO`
+  - example behavior: `may giat` can match `Máy giặt`
+- RabbitMQ synchronization:
+  - added durable queue `product.search.index.queue`
+  - queue binds to `product.exchange`
+  - consumed routing keys:
+    - `product.event.created`
+    - `product.event.updated`
+  - added `ProductSearchEventListener`
+  - listener persists valid product snapshots into `products_index`
+  - invalid events are ignored with English warning logs
+  - listener retry uses a simple 3-attempt Spring AMQP policy
+- Product-service producer changes:
+  - added `ProductSearchEvent`
+  - `POST /api/v1/products` publishes `product.event.created` after transaction commit
+  - `PUT /api/v1/products/{id}` publishes `product.event.updated` after transaction commit
+  - existing `product.event.sold` flow remains unchanged for interaction-service notifications
+  - RabbitMQ template observation is enabled for producer tracing
+- Search API:
+  - endpoint: `GET /api/v1/search/products?q=...`
+  - response format: `ApiResponse<PageResponseDTO<ProductSearchResponseDTO>>`
+  - supports standard `page`, `size`, and `sort` pageable parameters
+- Gateway changes:
+  - added route `/api/v1/search/**` -> `search-service`
+  - added `SEARCH_SERVICE_URL`
+  - `/api/v1/search/**` is public and bypasses JWT validation
+- Docker Compose:
+  - added `search-service` container `h-smart-search-service`
+  - exposed port `8084`
+  - wired dependencies on healthy Elasticsearch and RabbitMQ
+  - `api-gateway` now waits for healthy `search-service`
+- Observability:
+  - Zipkin endpoint configured through `MANAGEMENT_ZIPKIN_TRACING_ENDPOINT`
+  - Logstash destination configured through `LOGSTASH_HOST` and `LOGSTASH_PORT`
+  - logs include `traceId` and `spanId`
+  - query duration and hit count are logged in English for Kibana analysis
+- Documentation:
+  - created `search-service/search-service-notes.md`
+  - updated `api-gateway/api-gateway-notes.md`
+  - updated `product-service/product-service-notes.md`
+- Verification:
+  - `search-service`: `mvn -q test` passed
+  - `product-service`: `mvn -q test` passed
+  - `api-gateway`: `mvn -q test` passed
+  - `docker compose config --quiet` passed
+  - Docker builds passed for:
+    - `search-service`
+    - `product-service`
+    - `api-gateway`
+  - Docker runtime smoke test passed:
+    - `h-smart-search-service` started healthy on port `8084`
+    - RabbitMQ sample event published with routing key `product.event.created`
+    - event was consumed from `product.search.index.queue`
+    - product `9001` was indexed into `products_index`
+    - direct product-service update published `product.event.updated`
+    - product update event indexed product `5` into `products_index`
+    - gateway request `GET /api/v1/search/products?q=electrolux&page=0&size=10` returned `200`
+    - search response returned `1` indexed result
+  - verified product event Zipkin trace:
+    - trace id: `69f7435a5517493e80c375eb3ed8f370`
+    - services: `product-service`, `rabbitmq`, `search-service`
+  - verified gateway search Zipkin trace:
+    - trace id: `69f7435d7aa085f7d936a52aebb87ace`
+    - services: `api-gateway`, `search-service`
+  - verified Elasticsearch log correlation:
+    - index: `hsmart-logs-2026.05.03`
+    - logs include gateway request, search-service query timing, and gateway response with the same `traceId`
+
+[2026-05-04] Resilience4j circuit breakers and fallbacks added
+
+- Scope:
+  - added circuit breaker protection for sensitive gateway routes
+  - added circuit breaker protection for assistant RAG product catalog calls
+  - preserved English-only runtime log and fallback messages
+- `api-gateway` changes:
+  - added dependency `spring-cloud-starter-circuitbreaker-reactor-resilience4j`
+  - added route `/api/v1/predict/**` -> `ai-service`
+  - added `AI_SERVICE_URL` with Docker value `http://ai-service:8000`
+  - added `CircuitBreaker` filter to:
+    - `/api/v1/assistant/**` with `assistantCircuitBreaker`
+    - `/api/v1/search/**` with `searchCircuitBreaker`
+    - `/api/v1/predict/**` with `predictCircuitBreaker`
+  - added fallback controller endpoints:
+    - `forward:/fallback/assistant`
+    - `forward:/fallback/search`
+    - `forward:/fallback/predict`
+  - search fallback returns an empty product page with message:
+    - `Search service is busy, please try again later.`
+  - assistant fallback returns:
+    - `Assistant is currently resting, will be back soon!`
+  - prediction fallback returns:
+    - `Prediction service is busy, please try again later.`
+- `interaction-service` changes:
+  - added Resilience4j Spring Boot 3 and Micrometer dependencies
+  - wrapped product-service RAG lookup with `productCatalogCircuitBreaker`
+  - if product-service fails or the circuit is `OPEN`, assistant keeps the existing realtime-unavailable fallback behavior
+  - assistant still calls Ollama and answers from general knowledge when realtime product data cannot be retrieved
+- Circuit breaker settings:
+  - `failure-rate-threshold=50`
+  - `slow-call-duration-threshold=10s`
+  - `slow-call-rate-threshold=50`
+  - `sliding-window-size=10`
+  - `minimum-number-of-calls=5`
+  - `wait-duration-in-open-state=30s`
+  - `permitted-number-of-calls-in-half-open-state=3`
+  - automatic transition from `OPEN` to `HALF_OPEN` enabled
+- Observability:
+  - added circuit breaker event loggers for gateway and interaction-service
+  - state transitions such as `CLOSED`, `OPEN`, and `HALF_OPEN` are logged in English
+  - fallback handlers and RAG calls tag active Zipkin spans with Resilience4j metadata when a span is available
+  - logs continue flowing to Logstash/ELK with `traceId` and `spanId`
+  - actuator health/metrics exposure includes circuit breaker health/metrics
+- Documentation:
+  - updated `api-gateway/api-gateway-notes.md`
+  - updated `interaction-service/interaction-service-notes.md`
+  - updated `search-service/search-service-notes.md`
+  - updated `project-log.md`
+- Verification:
+  - `api-gateway`: `mvn -q test` passed
+  - `interaction-service`: `mvn -q test` passed
+  - `docker compose config --quiet` passed
+  - unit tests cover:
+    - search fallback empty page response
+    - assistant fallback message response
+    - product RAG lookup through a closed circuit breaker
+    - product RAG fallback when the circuit breaker is open
+    - product RAG fallback when product-service lookup fails
+
+[2026-05-04] Eureka service discovery and Spring Cloud LoadBalancer added
+
+- Scope:
+  - added a dedicated Eureka discovery server on port `8761`
+  - registered Spring Boot services as Eureka clients
+  - moved gateway Spring Boot routes from static Docker host URLs to `lb://` service IDs
+  - preserved existing Resilience4j circuit breakers on gateway routes
+  - preserved Zipkin trace propagation through load-balanced routes
+- New service:
+  - created `discovery-server`
+  - enabled Spring Cloud Netflix Eureka Server
+  - Docker container: `h-smart-discovery-server`
+  - dashboard: `http://localhost:8761`
+- Eureka clients:
+  - `api-gateway`
+  - `user-service`
+  - `product-service`
+  - `interaction-service`
+  - `search-service`
+- Gateway routing changes:
+  - `/api/v1/auth/**` -> `lb://user-service`
+  - `/api/v1/users/**` -> `lb://user-service`
+  - `/api/v1/products/**` -> `lb://product-service`
+  - `/api/v1/search/**` -> `lb://search-service`
+  - `/api/v1/assistant/**` -> `lb://interaction-service`
+  - `/api/v1/interactions/**` -> `lb://interaction-service`
+  - `/api/v1/interactions/ws/**` -> `lb:ws://interaction-service`
+  - `/api/v1/predict/**` remains on `AI_SERVICE_URL` because `ai-service` is not a Spring Boot Eureka client
+- Interaction-service RAG change:
+  - added a load-balanced `RestClient` for product catalog lookup
+  - default product-service URL is now `http://product-service`
+  - product-service is resolved through Eureka by Spring Cloud LoadBalancer
+  - existing `productCatalogCircuitBreaker` remains in place
+- Docker Compose:
+  - added `discovery-server`
+  - added `EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-server:8761/eureka/` to Spring Boot services
+  - gateway and Spring Boot services now wait for healthy `discovery-server`
+- Observability:
+  - Eureka registration logs are in English
+  - Zipkin trace propagation works through load-balanced gateway routes
+  - verified gateway client span contains `spring.cloud.gateway.route.uri=lb://search-service`
+  - logs continue flowing to Logstash with `traceId` and `spanId`
+- Documentation:
+  - created `discovery-server/discovery-server-notes.md`
+  - updated `api-gateway/api-gateway-notes.md`
+  - updated `user-service/user-service-notes.md`
+  - updated `product-service/product-service-notes.md`
+  - updated `interaction-service/interaction-service-notes.md`
+  - updated `search-service/search-service-notes.md`
+- Verification:
+  - Maven tests passed for:
+    - `discovery-server`
+    - `api-gateway`
+    - `user-service`
+    - `product-service`
+    - `interaction-service`
+    - `search-service`
+  - `docker compose config --quiet` passed
+  - Docker builds passed for:
+    - `discovery-server`
+    - `api-gateway`
+    - `user-service`
+    - `product-service`
+    - `interaction-service`
+    - `search-service`
+  - runtime Eureka registry returned all expected services as `UP`:
+    - `API-GATEWAY`
+    - `USER-SERVICE`
+    - `PRODUCT-SERVICE`
+    - `INTERACTION-SERVICE`
+    - `SEARCH-SERVICE`
+  - gateway health endpoint returned `200`
+  - load-balanced search request returned `200`:
+    - `GET http://localhost:8000/api/v1/search/products?q=electrolux&page=0&size=5`
+  - Zipkin trace verified:
+    - trace id: `69f7938a4ec99cfcd7530f5ed1fe5e9e`
+    - services: `api-gateway`, `search-service`
+    - route URI tag: `lb://search-service`
+  - Elasticsearch log correlation verified:
+    - index: `hsmart-logs-2026.05.03`
+    - log count for trace id `69f7938a4ec99cfcd7530f5ed1fe5e9e`: `3`
+    - logs include gateway request, search-service query timing, and gateway response
+
+[2026-05-04] Internal shared-secret protection added for Spring Boot services
+
+- Scope:
+  - protected direct access to internal Spring Boot services
+  - added a gateway-managed `X-Internal-Secret` header for trusted downstream calls
+  - kept `X-User-Id` and Micrometer trace propagation intact for valid requests
+  - preserved English-only runtime logs and response messages
+- Shared secret configuration:
+  - environment variable: `INTERNAL_SHARED_SECRET`
+  - application property: `internal.security.secret=${INTERNAL_SHARED_SECRET}`
+  - the actual secret value is not stored in `application.yml`
+  - Docker Compose requires the value from the host environment or a gitignored `.env` file
+  - recommended local setup is a long random UUID or secret string
+- `api-gateway` changes:
+  - added `InternalSecretForwardingFilter`
+  - strips any inbound client-provided `X-Internal-Secret`
+  - adds `X-Internal-Secret` only to `lb://` and `lb:ws://` internal routes
+  - leaves `AI_SERVICE_URL` outside this Spring Boot internal-route secret injection
+- Internal service changes:
+  - added `InternalSecurityFilter` to:
+    - `user-service`
+    - `product-service`
+    - `interaction-service`
+    - `search-service`
+  - missing or invalid `X-Internal-Secret` returns:
+    - status: `401 Unauthorized`
+    - message: `Invalid internal service credentials`
+  - rejected requests are logged in English with source IP
+  - valid requests continue through existing JWT, ownership, WebSocket, and search flows
+- Interaction-service RAG update:
+  - `ProductServiceClient` now sends both `X-User-Id` and `X-Internal-Secret` to `product-service`
+  - product RAG lookup remains protected by `productCatalogCircuitBreaker`
+- Docker Compose:
+  - added `INTERNAL_SHARED_SECRET` to:
+    - `api-gateway`
+    - `user-service`
+    - `product-service`
+    - `interaction-service`
+    - `search-service`
+  - updated healthchecks for internal services to send `X-Internal-Secret`
+  - `docker compose config` now requires `INTERNAL_SHARED_SECRET`
+- Observability:
+  - rejected direct requests are logged to ELK with source IP
+  - rejected direct requests now run after WebMVC observation so logs include `traceId` and `spanId`
+  - valid gateway requests keep the same trace id across gateway and downstream service logs
+- Documentation:
+  - updated `api-gateway/api-gateway-notes.md`
+  - updated `user-service/user-service-notes.md`
+  - updated `product-service/product-service-notes.md`
+  - updated `interaction-service/interaction-service-notes.md`
+  - updated `search-service/search-service-notes.md`
+- Verification:
+  - Maven tests passed for:
+    - `api-gateway`
+    - `user-service`
+    - `product-service`
+    - `interaction-service`
+    - `search-service`
+  - `docker compose config --quiet` passed with a shell-provided `INTERNAL_SHARED_SECRET`
+  - Docker builds passed for:
+    - `api-gateway`
+    - `user-service`
+    - `product-service`
+    - `interaction-service`
+    - `search-service`
+  - Docker runtime health passed for internal services with secret-aware healthchecks
+  - direct request without secret was rejected:
+    - request: `GET http://localhost:8084/health`
+    - response status: `401`
+    - response message: `Invalid internal service credentials`
+    - rejected log source IP: `172.20.0.1`
+    - rejected log trace id: `69f79be22317ec68e8de9d4b7287ca95`
+    - Elasticsearch index: `hsmart-logs-2026.05.03`
+  - valid gateway request still succeeded:
+    - request: `GET http://localhost:8000/api/v1/search/products?q=electrolux&page=0&size=5`
+    - response status: `200`
+    - trace id: `69f79c13b96a42034093e1595430b594`
+    - Zipkin services: `api-gateway`, `search-service`
+    - gateway route URI tag: `lb://search-service`
+    - gateway and search-service logs kept the same `traceId`
+
+[2026-05-04] order-service added for purchase workflow and event-driven product status updates
+
+- Scope:
+  - added a new `order-service` on port `8085`
+  - added PostgreSQL database `hsmart_order_db`
+  - added order create and order complete APIs
+  - integrated Eureka discovery, Zipkin tracing, Logstash JSON logging, internal shared-secret protection, and RabbitMQ publishing
+- Order domain:
+  - entity: `Order`
+  - fields: `id`, `buyerId`, `sellerId`, `productId`, `amount`, `status`, `createdAt`, `updatedAt`
+  - statuses: `PENDING`, `COMPLETED`, `CANCELLED`
+- Order create flow:
+  - endpoint: `POST /api/v1/orders`
+  - `buyerId` is read from gateway-provided `X-User-Id`
+  - `order-service` calls `product-service` through load-balanced `RestClient`
+  - product must exist and have status `ACTIVE`
+  - order amount is copied from the product price
+  - order is saved as `PENDING`
+- Order complete flow:
+  - endpoint: `POST /api/v1/orders/{id}/complete`
+  - only the order buyer can complete the order
+  - only `PENDING` orders can be completed
+  - `order.event.completed` is published after the database transaction commits
+  - event payload contains `productId`
+- Product synchronization:
+  - `product-service` now declares `order.exchange`
+  - queue: `order.product.update.queue`
+  - binding routing key: `order.event.completed`
+  - listener: `OrderCompletedEventListener`
+  - consumed order completion events mark the product as `SOLD`
+  - duplicate events are skipped when the product is already `SOLD`
+  - product-service publishes `product.event.updated` for search sync and `product.event.sold` for seller notification after an order-driven status change
+- Gateway and Docker:
+  - added gateway route `/api/v1/orders/** -> lb://order-service`
+  - route is protected by the existing JWT authentication filter
+  - added Docker service `h-smart-order-service`
+  - added Docker service `h-smart-order-postgres-db`
+  - configured order-service JVM as `-Xms256m -Xmx384m`
+  - configured Docker memory limit as `400m`
+- Documentation:
+  - created `order-service/order-service-notes.md`
+  - updated `api-gateway/api-gateway-notes.md`
+  - updated `product-service/product-service-notes.md`
+- Verification:
+  - `mvn test` passed for `order-service`
+  - `mvn test` passed for `product-service`
+  - `mvn test` passed for `api-gateway`
+  - `docker compose config --quiet` passed with `INTERNAL_SHARED_SECRET` supplied from the shell
+  - Docker build passed for:
+    - `order-service`
+    - `product-service`
+    - `api-gateway`
+  - Docker runtime smoke test passed:
+    - direct internal create order request returned `201`
+    - direct internal complete order request returned `200`
+    - order id: `1`
+    - product id: `5`
+    - product status changed to `SOLD`
+    - RabbitMQ binding exists from `order.exchange` to `order.product.update.queue` with routing key `order.event.completed`
+    - order-service logged `Published order completed event for product 5`
+    - product-service logged `Processed order completed event for product 5`
+    - product-service logged `Published product sold event for product 5 and seller seller-bk-1`
+    - observed trace id across order-service and product-service logs: `69f8290adb06113ee6510f5a84d57c5e`
+  - Gateway and discovery runtime checks passed:
+    - `GET http://localhost:8000/health` returned `200`
+    - unauthenticated `POST http://localhost:8000/api/v1/orders` returned `401`
+    - Eureka registered `ORDER-SERVICE` as `UP`
+    - Eureka instance id: `order-service:8085`
+
+[2026-05-04] review-service added for post-purchase reviews and seller trust score updates
+
+- Scope:
+  - added a new `review-service` on port `8086`
+  - added PostgreSQL database `hsmart_review_db`
+  - added public seller review reads
+  - added authenticated review creation after completed orders
+  - integrated Eureka discovery, Zipkin tracing, Logstash JSON logging, internal shared-secret protection, and RabbitMQ publishing
+- Review domain:
+  - entity: `Review`
+  - fields: `id`, `orderId`, `buyerId`, `sellerId`, `rating`, `comment`, `createdAt`
+  - `rating` is validated from `1` to `5`
+  - each order can be reviewed only once
+- Review create flow:
+  - endpoint: `POST /api/v1/reviews`
+  - JWT is required at `api-gateway`
+  - `buyerId` is read from gateway-provided `X-User-Id`
+  - `review-service` calls `order-service` through load-balanced `RestClient`
+  - order must have status `COMPLETED`
+  - order `buyerId` must match the current reviewer
+  - review is saved to `hsmart_review_db`
+  - `review.event.created` is published after the database transaction commits
+  - event payload contains `sellerId` and `rating`
+- Public review read flow:
+  - endpoint: `GET /api/v1/reviews/sellers/{sellerId}`
+  - no JWT is required
+  - gateway still forwards `X-Internal-Secret` to `review-service`
+- Order-service update:
+  - added `GET /api/v1/orders/{id}` for internal order verification by `review-service`
+- User-service trust score update:
+  - added `trustScore` and `reviewCount` fields to `User`
+  - added RabbitMQ exchange binding for:
+    - exchange: `review.exchange`
+    - queue: `review.trust.update.queue`
+    - routing key: `review.event.created`
+  - added `ReviewCreatedEventListener`
+  - added `UserTrustScoreServiceImpl`
+  - trust score is calculated as a running average:
+    - `trustScore = ((currentTrustScore * reviewCount) + rating) / (reviewCount + 1)`
+- Gateway and Docker:
+  - added gateway route `/api/v1/reviews/** -> lb://review-service`
+  - `GET /api/v1/reviews/**` is public
+  - `POST /api/v1/reviews` requires JWT
+  - added Docker service `h-smart-review-service`
+  - added Docker service `h-smart-review-postgres-db`
+  - configured review-service JVM as `-Xms256m -Xmx384m`
+  - configured Docker memory limit as `400m`
+  - added RabbitMQ connection settings to `user-service`
+- Documentation:
+  - created `review-service/review-service-notes.md`
+  - updated `api-gateway/api-gateway-notes.md`
+  - updated `order-service/order-service-notes.md`
+  - updated `user-service/user-service-notes.md`
+- Verification:
+  - `mvn test` passed for:
+    - `review-service`
+    - `order-service`
+    - `user-service`
+    - `api-gateway`
+  - `docker compose config --quiet` passed with `INTERNAL_SHARED_SECRET` supplied from the shell
+  - Docker build passed for:
+    - `review-service`
+    - `order-service`
+    - `user-service`
+    - `api-gateway`
+  - Docker runtime smoke test passed:
+    - public `GET /api/v1/reviews/sellers/productuser1775766067` returned `200`
+    - unauthenticated `POST /api/v1/reviews` returned `401`
+    - JWT-authenticated buyer created order `2`
+    - order `2` was completed
+    - review `1` was created for order `2`
+    - review-service logged `Published review created event for seller productuser1775766067 with rating 5`
+    - user-service logged `Updated trust score for seller productuser1775766067 to 5.00 after 1 reviews`
+    - RabbitMQ binding exists from `review.exchange` to `review.trust.update.queue` with routing key `review.event.created`
+    - Eureka registered `REVIEW-SERVICE` as `UP`
+    - Eureka instance id: `review-service:8086`
+    - observed trace id across review-service and user-service logs: `69f8349c6a811584e53be9a74ec0ab97`
+    - Zipkin trace `69f8349c6a811584e53be9a74ec0ab97` contains services `api-gateway`, `review-service`, and `user-service`
+
+[2026-05-05] Service notes filenames standardized for specialized services
+
+- Renamed generic notes files to service-specific filenames:
+  - `search-service/SERVICE-NOTES.md` -> `search-service/search-service-notes.md`
+  - `order-service/SERVICE-NOTES.md` -> `order-service/order-service-notes.md`
+  - `review-service/SERVICE-NOTES.md` -> `review-service/review-service-notes.md`
+- Documentation rule going forward:
+  - new service documentation should use `<service-name>-notes.md`
+  - this keeps service notes easy to identify when several files are open at the same time

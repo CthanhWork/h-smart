@@ -2,6 +2,7 @@ package com.hsmart.backend.application.dto;
 
 import com.hsmart.backend.domain.entities.Role;
 import io.swagger.v3.oas.annotations.media.Schema;
+import java.math.BigDecimal;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -21,4 +22,6 @@ public class UserProfileResponseDTO {
     private String phoneNumber;
     private String address;
     private String avatarUrl;
+    private BigDecimal trustScore;
+    private Long reviewCount;
 }

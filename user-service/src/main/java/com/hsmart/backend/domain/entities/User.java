@@ -9,6 +9,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -51,10 +52,24 @@ public class User {
     @Column(columnDefinition = "text")
     private String avatarUrl;
 
+    @Builder.Default
+    @Column(name = "trust_score", precision = 4, scale = 2)
+    private BigDecimal trustScore = BigDecimal.ZERO;
+
+    @Builder.Default
+    @Column(name = "review_count")
+    private Long reviewCount = 0L;
+
     @PrePersist
     public void applyDefaults() {
         if (role == null) {
             role = Role.USER;
+        }
+        if (trustScore == null) {
+            trustScore = BigDecimal.ZERO;
+        }
+        if (reviewCount == null) {
+            reviewCount = 0L;
         }
     }
 }

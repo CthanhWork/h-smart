@@ -19,27 +19,53 @@ spring:
         response-timeout: ${GATEWAY_RESPONSE_TIMEOUT:120s}
       routes:
         - id: user-auth-route
-          uri: ${USER_SERVICE_URL:http://user-service:8081}
+          uri: lb://user-service
           predicates:
             - Path=/api/v1/auth/**
         - id: user-profile-route
-          uri: ${USER_SERVICE_URL:http://user-service:8081}
+          uri: lb://user-service
           predicates:
             - Path=/api/v1/users/**
         - id: product-route
-          uri: ${PRODUCT_SERVICE_URL:http://product-service:8082}
+          uri: lb://product-service
           predicates:
             - Path=/api/v1/products/**
+        - id: search-route
+          uri: lb://search-service
+          predicates:
+            - Path=/api/v1/search/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: searchCircuitBreaker
+                fallbackUri: forward:/fallback/search
+        - id: order-route
+          uri: lb://order-service
+          predicates:
+            - Path=/api/v1/orders/**
+        - id: review-route
+          uri: lb://review-service
+          predicates:
+            - Path=/api/v1/reviews/**
+        - id: predict-route
+          uri: ${AI_SERVICE_URL:http://ai-service:8000}
+          predicates:
+            - Path=/api/v1/predict/**
+          filters:
+            - name: CircuitBreaker
+              args:
+                name: predictCircuitBreaker
+                fallbackUri: forward:/fallback/predict
         - id: interaction-websocket-route
-          uri: ${INTERACTION_SERVICE_WS_URL:ws://interaction-service:8083}
+          uri: lb:ws://interaction-service
           predicates:
             - Path=/api/v1/interactions/ws,/api/v1/interactions/ws/**
         - id: interaction-route
-          uri: ${INTERACTION_SERVICE_URL:http://interaction-service:8083}
+          uri: lb://interaction-service
           predicates:
             - Path=/api/v1/interactions/**
         - id: assistant-route
-          uri: ${INTERACTION_SERVICE_URL:http://interaction-service:8083}
+          uri: lb://interaction-service
           predicates:
             - Path=/api/v1/assistant/**
           filters:
@@ -51,6 +77,41 @@ spring:
                 assistant-redis-rate-limiter.replenishRate: ${ASSISTANT_RATE_LIMIT_REPLENISH_RATE:5}
                 assistant-redis-rate-limiter.burstCapacity: ${ASSISTANT_RATE_LIMIT_BURST_CAPACITY:10}
                 assistant-redis-rate-limiter.refillPeriodSeconds: ${ASSISTANT_RATE_LIMIT_REFILL_PERIOD_SECONDS:60}
+            - name: CircuitBreaker
+              args:
+                name: assistantCircuitBreaker
+                fallbackUri: forward:/fallback/assistant
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://discovery-server:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${server.port}
+
+resilience4j:
+  circuitbreaker:
+    configs:
+      default:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        slow-call-duration-threshold: 10s
+        slow-call-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+    instances:
+      assistantCircuitBreaker:
+        base-config: default
+      searchCircuitBreaker:
+        base-config: default
+      predictCircuitBreaker:
+        base-config: default
 
 logging:
   logstash:
@@ -60,6 +121,13 @@ logging:
     com.hsmart.gateway: INFO
 
 management:
+  health:
+    circuitbreakers:
+      enabled: true
+  endpoints:
+    web:
+      exposure:
+        include: health,metrics
   tracing:
     sampling:
       probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
@@ -70,3 +138,7 @@ management:
 app:
   jwt:
     secret: ${JWT_SECRET:UFdHZG1lU3Q2UTNYV2lBc1pDajFuWWtFaWpNd2pmd0h6aFZ4T3V0bE1YQU5SVEtrQ1VGVW9vV1h6S1J4bw==}
+
+internal:
+  security:
+    secret: ${INTERNAL_SHARED_SECRET:}

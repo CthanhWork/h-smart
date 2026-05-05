@@ -1,0 +1,56 @@
+server:
+  port: ${SERVER_PORT:8084}
+
+spring:
+  application:
+    name: search-service
+  elasticsearch:
+    uris: ${SPRING_ELASTICSEARCH_URIS:http://h-smart-elasticsearch:9200}
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:rabbitmq}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:hsmart}
+    password: ${SPRING_RABBITMQ_PASSWORD:hsmart_password}
+    listener:
+      simple:
+        observation-enabled: true
+        retry:
+          enabled: true
+          initial-interval: 1s
+          max-attempts: 3
+          max-interval: 5s
+          multiplier: 2
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+internal:
+  security:
+    enabled: ${INTERNAL_SECURITY_ENABLED:true}
+    secret: ${INTERNAL_SHARED_SECRET:}
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://discovery-server:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${server.port}
+
+logging:
+  logstash:
+    host: ${LOGSTASH_HOST:localhost}
+    port: ${LOGSTASH_PORT:5044}
+  level:
+    com.hsmart.search: INFO
+
+management:
+  tracing:
+    sampling:
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
+  zipkin:
+    tracing:
+      endpoint: ${MANAGEMENT_ZIPKIN_TRACING_ENDPOINT:http://localhost:9411/api/v2/spans}

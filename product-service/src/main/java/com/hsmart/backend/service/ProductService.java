@@ -14,4 +14,5 @@ public interface ProductService {
     void deleteProduct(Long id);
     PageResponseDTO<ProductResponseDTO> getAllProducts(String keyword, ProductStatus status, Long categoryId, Pageable pageable);
     ProductResponseDTO getProductById(Long id);
+    void markProductSoldFromOrderEvent(Long productId);
 }

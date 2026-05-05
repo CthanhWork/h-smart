@@ -1,0 +1,13 @@
+{
+  "analysis": {
+    "analyzer": {
+      "hsmart_text_analyzer": {
+        "tokenizer": "standard",
+        "filter": [
+          "lowercase",
+          "asciifolding"
+        ]
+      }
+    }
+  }
+}

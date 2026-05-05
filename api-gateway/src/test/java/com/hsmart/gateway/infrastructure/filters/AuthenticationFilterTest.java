@@ -47,6 +47,63 @@ class AuthenticationFilterTest {
     }
 
     @Test
+    void shouldBypassAuthenticationForPublicSearchPath() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/search/products?q=may%20giat").build()
+        );
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertTrue(chainCalled.get());
+        verifyNoInteractions(jwtService);
+    }
+
+    @Test
+    void shouldBypassAuthenticationForPublicReviewReadPath() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/reviews/sellers/seller-1").build()
+        );
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertTrue(chainCalled.get());
+        verifyNoInteractions(jwtService);
+    }
+
+    @Test
+    void shouldRequireAuthenticationForReviewCreatePath() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/reviews").build()
+        );
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertFalse(chainCalled.get());
+        assertEquals(401, exchange.getResponse().getStatusCode().value());
+    }
+
+    @Test
     void shouldBypassAuthenticationForOptionsRequest() {
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.method(HttpMethod.OPTIONS, "/api/v1/users/profile").build()

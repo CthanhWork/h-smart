@@ -6,6 +6,10 @@ import com.hsmart.backend.application.exceptions.ProductCatalogUnavailableExcept
 import com.hsmart.backend.service.ProductClient;
 import com.hsmart.backend.service.ProductContextService;
 import com.hsmart.backend.service.ProductKeywordExtractor;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
+import io.micrometer.tracing.Span;
+import io.micrometer.tracing.Tracer;
 import java.text.NumberFormat;
 import java.util.List;
 import java.util.Locale;
@@ -18,6 +22,8 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class ProductContextServiceImpl implements ProductContextService {
 
+    public static final String PRODUCT_CATALOG_CIRCUIT_BREAKER = "productCatalogCircuitBreaker";
+
     public static final String REALTIME_UNAVAILABLE_NOTICE =
             "Hiện tại tôi không thể truy cập dữ liệu thời gian thực, đây là thông tin tham khảo...";
 
@@ -25,6 +31,8 @@ public class ProductContextServiceImpl implements ProductContextService {
 
     private final ProductKeywordExtractor productKeywordExtractor;
     private final ProductClient productClient;
+    private final CircuitBreakerRegistry circuitBreakerRegistry;
+    private final Tracer tracer;
 
     @Override
     public AssistantProductContext buildContext(String message, String userId, String traceId) {
@@ -37,20 +45,14 @@ public class ProductContextServiceImpl implements ProductContextService {
         long startedAt = System.nanoTime();
         log.info("Detected product keywords {} for assistant request with traceId {}", keywords, traceId);
 
+        List<ProductCatalogItem> products;
         try {
-            List<ProductCatalogItem> products = productClient.findRelevantProducts(keywords, userId);
+            products = findProductsWithCircuitBreaker(keywords, userId, traceId);
             log.info("Loaded {} product catalog items for keywords {} with traceId {} in {} ms",
                     products.size(), keywords, traceId, elapsedMillis(startedAt));
-
-            return new AssistantProductContext(
-                    keywords,
-                    buildAvailablePrompt(products, keywords),
-                    false,
-                    products.size()
-            );
-        } catch (ProductCatalogUnavailableException exception) {
-            log.warn("Product catalog retrieval failed for keywords {} with traceId {}. Assistant will answer without realtime product data",
-                    keywords, traceId, exception);
+        } catch (RuntimeException exception) {
+            log.warn("Product catalog circuit breaker fallback triggered for keywords {} with traceId {}. Assistant will answer without realtime product data. Reason: {}",
+                    keywords, traceId, exception.getClass().getSimpleName());
             return new AssistantProductContext(
                     keywords,
                     buildUnavailablePrompt(),
@@ -58,6 +60,38 @@ public class ProductContextServiceImpl implements ProductContextService {
                     0
             );
         }
+
+        return new AssistantProductContext(
+                keywords,
+                buildAvailablePrompt(products, keywords),
+                false,
+                products.size()
+        );
+    }
+
+    private List<ProductCatalogItem> findProductsWithCircuitBreaker(List<String> keywords, String userId, String traceId) {
+        CircuitBreaker circuitBreaker = circuitBreakerRegistry.circuitBreaker(PRODUCT_CATALOG_CIRCUIT_BREAKER);
+        tagCurrentSpan(circuitBreaker);
+
+        try {
+            return circuitBreaker.executeSupplier(() -> productClient.findRelevantProducts(keywords, userId));
+        } catch (ProductCatalogUnavailableException exception) {
+            throw exception;
+        } catch (RuntimeException exception) {
+            log.warn("Product catalog circuit breaker {} rejected or failed a request in state {} with traceId {}. Reason: {}",
+                    circuitBreaker.getName(), circuitBreaker.getState(), traceId, exception.getClass().getSimpleName());
+            throw new ProductCatalogUnavailableException("Product catalog is unavailable through circuit breaker", exception);
+        }
+    }
+
+    private void tagCurrentSpan(CircuitBreaker circuitBreaker) {
+        Span span = tracer.currentSpan();
+        if (span == null) {
+            return;
+        }
+
+        span.tag("resilience4j.circuit_breaker.name", circuitBreaker.getName());
+        span.tag("resilience4j.circuit_breaker.state", circuitBreaker.getState().name());
     }
 
     private String buildAvailablePrompt(List<ProductCatalogItem> products, List<String> keywords) {

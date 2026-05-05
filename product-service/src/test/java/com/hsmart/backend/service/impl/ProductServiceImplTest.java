@@ -143,5 +143,12 @@ class ProductServiceImplTest {
                         && event.getSellerId().equals("seller-1")
                         && event.getTitle().equals("Microwave")
         ));
+        verify(productEventPublisher, times(1)).publishProductUpdated(argThat(event ->
+                event.getId().equals(12L)
+                        && event.getTitle().equals("Microwave")
+                        && event.getDescription().equals("Ready to pick up")
+                        && event.getPrice().compareTo(BigDecimal.valueOf(120)) == 0
+                        && event.getStatus().equals("SOLD")
+        ));
     }
 }

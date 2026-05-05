@@ -25,6 +25,8 @@ Current scope:
 - Messaging: RabbitMQ
 - Assistant model: `qwen3:4b-instruct` through Ollama
 - Product catalog source: `product-service`
+- Resilience: Resilience4j circuit breaker
+- Discovery: Eureka Client and Spring Cloud LoadBalancer
 - WebSocket: STOMP over Spring WebSocket
 - API docs: `/swagger-ui.html`
 
@@ -88,6 +90,31 @@ Fields:
 - WebSocket handshake stores `X-User-Id` in session attributes
 - STOMP `CONNECT` binds the authenticated user to a `Principal`
 - runtime user queues use the forwarded gateway user id as the STOMP principal name
+
+## Internal Service Authentication
+
+`interaction-service` accepts HTTP requests only when the trusted internal secret header is present.
+
+Runtime behavior:
+
+- filter: `InternalSecurityFilter`
+- required header: `X-Internal-Secret`
+- configured secret source: `INTERNAL_SHARED_SECRET`
+- invalid or missing secret returns `401 Unauthorized`
+- rejection response follows the standard `ApiResponse` JSON shape
+- rejected requests are logged in English with the source IP
+- rejected logs are sent to Logstash/ELK with `traceId` and `spanId` when tracing is active
+
+Secret handling:
+
+- the secret is not hardcoded in `application.yml`
+- Docker Compose requires it from the host environment or a gitignored `.env` file
+- valid gateway requests keep `X-User-Id` for REST and WebSocket identity handling
+
+Outbound internal calls:
+
+- assistant RAG product lookup sends `X-Internal-Secret` to `product-service`
+- `ProductServiceClient` keeps the existing `X-User-Id` header and adds the internal secret header
 
 ## HTTP Endpoints
 
@@ -164,8 +191,10 @@ Behavior:
 Product-aware RAG behavior:
 
 - `ProductKeywordExtractor` scans the user message for known product category keywords.
-- `ProductServiceClient` calls `GET /api/v1/products` on `product-service`.
-- Default product-service URL: `http://product-service:8082`
+- `ProductServiceClient` calls `GET /api/v1/products` on `product-service` through a load-balanced `RestClient`.
+- Default product-service service ID URL: `http://product-service`
+- `product-service` is resolved from Eureka by Spring Cloud LoadBalancer.
+- Product catalog lookup is wrapped by `productCatalogCircuitBreaker`.
 - Request parameters used by the client:
   - `keyword=<detected product keyword>`
   - `status=ACTIVE`
@@ -186,8 +215,9 @@ Dưới đây là dữ liệu thực tế từ kho hàng H-Smart: [Dữ liệu s
 
 If `product-service` is unavailable:
 
+- Resilience4j opens or rejects calls through `productCatalogCircuitBreaker` according to the configured failure and slow-call thresholds.
 - the assistant still calls Ollama and answers using general knowledge
-- logs an English warning that realtime product retrieval failed
+- logs an English warning that the product catalog circuit breaker fallback was triggered
 - the user-facing answer is prefixed with:
 
 ```text
@@ -205,6 +235,30 @@ Environment variables:
 - `PRODUCT_SERVICE_PAGE_SIZE`
 - `PRODUCT_SERVICE_CONNECT_TIMEOUT_MS`
 - `PRODUCT_SERVICE_READ_TIMEOUT_MS`
+- `EUREKA_CLIENT_SERVICEURL_DEFAULTZONE`
+- `INTERNAL_SHARED_SECRET`
+
+Resilience4j configuration:
+
+- circuit breaker name: `productCatalogCircuitBreaker`
+- `failure-rate-threshold=50`
+- `slow-call-duration-threshold=10s`
+- `slow-call-rate-threshold=50`
+- `sliding-window-size=10`
+- `minimum-number-of-calls=5`
+- `wait-duration-in-open-state=30s`
+- `permitted-number-of-calls-in-half-open-state=3`
+- automatic transition from `OPEN` to `HALF_OPEN` is enabled
+
+Service discovery:
+
+- `interaction-service` registers itself with Eureka.
+- Eureka Dashboard: `http://localhost:8761`
+- Docker default zone: `http://discovery-server:8761/eureka/`
+- registry service ID: `interaction-service`
+- registry instance ID: `interaction-service:8083`
+- gateway routes `/api/v1/assistant/**` and `/api/v1/interactions/**` to `lb://interaction-service`
+- gateway routes `/api/v1/interactions/ws/**` to `lb:ws://interaction-service`
 
 Local prerequisites:
 
@@ -311,6 +365,7 @@ Runtime observability is configured for the Docker development stack.
 
 Dashboards:
 
+- Eureka: `http://localhost:8761`
 - Zipkin: `http://localhost:9411`
 - Kibana: `http://localhost:5601`
 - Elasticsearch API: `http://localhost:9200`
@@ -329,6 +384,9 @@ Centralized logging:
 - Kibana data view pattern: `hsmart-logs-*`
 - Timestamp field: `@timestamp`
 - Logs include `service`, `traceId`, and `spanId` fields for correlation with Zipkin traces.
+- Resilience4j logs include circuit breaker state transitions such as `CLOSED`, `OPEN`, and `HALF_OPEN`.
+- Product catalog fallback logs include the active request `traceId`.
+- Assistant RAG spans are tagged with `resilience4j.circuit_breaker.name` and `resilience4j.circuit_breaker.state` when a trace span is available.
 
 Current runtime verification status:
 
@@ -364,14 +422,22 @@ Current runtime verification status:
   - product-service was temporarily stopped
   - assistant still returned `200`
   - response was prefixed with `Hiện tại tôi không thể truy cập dữ liệu thời gian thực, đây là thông tin tham khảo...`
+- Verified Eureka registration:
+  - service ID: `INTERACTION-SERVICE`
+  - instance: `interaction-service:8083`
+  - status: `UP`
 
 ## Current Verification
 
 - unit test added for `ChatServiceImpl`
 - unit test added for `ProductSoldEventListener`
 - unit test added for `AssistantServiceImpl`
+- unit test added for `ProductContextServiceImpl`
 - assistant unit test covers product context prompt injection
 - assistant unit test covers realtime product-data fallback prefix
+- product context unit test covers lookup through a closed circuit breaker
+- product context unit test covers fallback when `productCatalogCircuitBreaker` is `OPEN`
+- product context unit test covers fallback when product-service lookup fails
 - RabbitMQ queue binding configuration validated with `docker compose config`
 - Docker runtime verified with:
   - successful MongoDB connection

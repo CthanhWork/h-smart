@@ -23,6 +23,7 @@ Service nay duoc tach rieng khoi `backend-service` de dam bao:
 - MapStruct
 - Swagger OpenAPI
 - Docker
+- Spring Cloud Netflix Eureka Client
 
 ## 3. Database
 
@@ -369,6 +370,7 @@ Bien hien tai:
 - `SPRING_DATASOURCE_PASSWORD`
 - `JWT_SECRET`
 - `JWT_EXPIRATION_MS`
+- `EUREKA_CLIENT_SERVICEURL_DEFAULTZONE`
 
 Mac dinh:
 
@@ -487,7 +489,54 @@ Luu y:
 
 - `502`, `503`, `504` la nhom loi can test o tang `api-gateway` hoac integration level, khong phai la leaf-service responsibility chinh cua `user-service`.
 
-## 21. Ket luan
+## 21. Internal service authentication
+
+`user-service` only accepts HTTP requests that include the trusted internal secret header.
+
+Runtime behavior:
+
+- filter: `InternalSecurityFilter`
+- required header: `X-Internal-Secret`
+- configured secret source: `INTERNAL_SHARED_SECRET`
+- configuration path: `internal.security.secret=${INTERNAL_SHARED_SECRET}`
+- if the header is missing or invalid, the service returns `401 Unauthorized`
+- the rejection response follows the standard `ApiResponse` JSON contract
+- rejected requests are logged in English with the source IP
+- rejected request logs are sent to Logstash/ELK with `traceId` and `spanId` when tracing is active
+
+Secret handling:
+
+- the secret value is not stored in `application.yml`
+- Docker Compose requires `INTERNAL_SHARED_SECRET` from the host environment or a gitignored `.env` file
+- test profile disables this internal filter so controller/status tests can run without a live gateway
+
+Valid requests through `api-gateway` keep the existing JWT flow and gateway-forwarded identity.
+
+## 22. Service discovery
+
+`user-service` registers itself with Eureka when running in Docker.
+
+Eureka Dashboard:
+
+- `http://localhost:8761`
+
+Docker default zone:
+
+- `EUREKA_CLIENT_SERVICEURL_DEFAULTZONE=http://discovery-server:8761/eureka/`
+
+Registry identity:
+
+- service ID: `user-service`
+- instance ID: `user-service:8081`
+
+Gateway routing:
+
+- `/api/v1/auth/**` -> `lb://user-service`
+- `/api/v1/users/**` -> `lb://user-service`
+
+Runtime registration logs are emitted in English by Spring Cloud Netflix.
+
+## 23. Ket luan
 
 `user-service` da duoc khoi tao dung huong:
 
@@ -501,12 +550,13 @@ Luu y:
 
 Tai thoi diem nay, service da san sang cho viec standardize contract loi va tich hop tiep vao `api-gateway`.
 
-## 22. Observability
+## 24. Observability
 
 Runtime observability is configured for the Docker development stack.
 
 Dashboards:
 
+- Eureka: `http://localhost:8761`
 - Zipkin: `http://localhost:9411`
 - Kibana: `http://localhost:5601`
 - Elasticsearch API: `http://localhost:9200`
@@ -539,3 +589,49 @@ Current runtime verification status:
   - span count: `7`
 - Verified centralized logging:
   - Elasticsearch index `hsmart-logs-2026.04.27` received service logs through Logstash
+- Verified Eureka registration:
+  - service ID: `USER-SERVICE`
+  - instance: `user-service:8081`
+  - status: `UP`
+- Internal shared-secret protection is configured with the same JSON logging stack as the rest of the service.
+
+## 25. Review Trust Score Events
+
+`user-service` consumes seller review events from RabbitMQ and updates `User.trustScore` without a direct REST call from `review-service`.
+
+User trust fields:
+
+- `trustScore`
+- `reviewCount`
+
+Configured broker resources:
+
+- topic exchange: `review.exchange`
+- durable queue: `review.trust.update.queue`
+- routing key: `review.event.created`
+
+Consumed event:
+
+- event DTO: `ReviewCreatedEvent`
+- payload fields:
+  - `sellerId`
+  - `rating`
+
+Listener behavior:
+
+- `ReviewCreatedEventListener` listens to `review.trust.update.queue`
+- `UserTrustScoreServiceImpl` finds the seller by username/sellerId
+- trust score is recalculated as a running average:
+  - `trustScore = ((currentTrustScore * reviewCount) + rating) / (reviewCount + 1)`
+- `reviewCount` increments by `1`
+- listener retry is enabled through the RabbitMQ simple listener retry policy
+- logs are in English and include `traceId` and `spanId` when tracing is active
+
+Runtime verification:
+
+- `review-service` published `review.event.created` for seller `productuser1775766067`
+- `user-service` consumed the event from `review.trust.update.queue`
+- seller trust score became `5.00`
+- seller review count became `1`
+- observed trace id across review-service and user-service logs: `69f8349c6a811584e53be9a74ec0ab97`
+- Zipkin trace `69f8349c6a811584e53be9a74ec0ab97` contains `api-gateway`, `review-service`, and `user-service`

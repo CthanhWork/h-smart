@@ -2,6 +2,7 @@ package com.hsmart.backend.infrastructure.config;
 
 import java.time.Duration;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.cloud.client.loadbalancer.LoadBalanced;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
@@ -11,8 +12,18 @@ import org.springframework.web.client.RestClient;
 public class ProductClientConfig {
 
     @Bean
+    @LoadBalanced
+    @Qualifier("productLoadBalancedRestClientBuilder")
+    public RestClient.Builder productLoadBalancedRestClientBuilder() {
+        return RestClient.builder();
+    }
+
+    @Bean
     @Qualifier("productServiceRestClient")
-    public RestClient productServiceRestClient(RestClient.Builder builder, ProductServiceProperties properties) {
+    public RestClient productServiceRestClient(
+            @Qualifier("productLoadBalancedRestClientBuilder") RestClient.Builder builder,
+            ProductServiceProperties properties
+    ) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofMillis(properties.connectTimeoutMs()));
         requestFactory.setReadTimeout(Duration.ofMillis(properties.readTimeoutMs()));

@@ -7,6 +7,7 @@ import com.hsmart.backend.application.dto.PageResponseDTO;
 import com.hsmart.backend.application.dto.PredictResponseDTO;
 import com.hsmart.backend.application.dto.ProductRequestDTO;
 import com.hsmart.backend.application.dto.ProductResponseDTO;
+import com.hsmart.backend.application.dto.ProductSearchEvent;
 import com.hsmart.backend.application.dto.ProductSoldEvent;
 import com.hsmart.backend.application.exceptions.CategoryNotFoundException;
 import com.hsmart.backend.application.exceptions.FileProcessingException;
@@ -85,6 +86,7 @@ public class ProductServiceImpl implements ProductService {
         );
 
         Product savedProduct = productRepository.save(product);
+        publishProductCreatedAfterCommit(savedProduct);
         log.info("Created product {} for seller {}", savedProduct.getId(), savedProduct.getSellerId());
         return toProductResponse(savedProduct);
     }
@@ -104,6 +106,7 @@ public class ProductServiceImpl implements ProductService {
         product.setCategory(category);
 
         Product savedProduct = productRepository.save(product);
+        publishProductUpdatedAfterCommit(savedProduct);
         if (isTransitionToSold(previousStatus, savedProduct.getStatus())) {
             publishProductSoldAfterCommit(savedProduct);
         }
@@ -142,6 +145,23 @@ public class ProductServiceImpl implements ProductService {
         return toProductResponse(product);
     }
 
+    @Override
+    public void markProductSoldFromOrderEvent(Long productId) {
+        Product product = getActiveProduct(productId);
+        ProductStatus previousStatus = product.getStatus();
+
+        if (previousStatus == ProductStatus.SOLD) {
+            log.info("Skipped order completion product update because product {} is already SOLD", productId);
+            return;
+        }
+
+        product.setStatus(ProductStatus.SOLD);
+        Product savedProduct = productRepository.save(product);
+        publishProductUpdatedAfterCommit(savedProduct);
+        publishProductSoldAfterCommit(savedProduct);
+        log.info("Marked product {} as SOLD from order completion event", savedProduct.getId());
+    }
+
     private String getCurrentUserId() {
         return UserContextHolder.getCurrentUserId()
                 .orElseThrow(MissingUserContextException::new);
@@ -176,6 +196,16 @@ public class ProductServiceImpl implements ProductService {
         return previousStatus != ProductStatus.SOLD && currentStatus == ProductStatus.SOLD;
     }
 
+    private void publishProductCreatedAfterCommit(Product product) {
+        ProductSearchEvent event = toProductSearchEvent(product);
+        publishAfterCommit(() -> productEventPublisher.publishProductCreated(event));
+    }
+
+    private void publishProductUpdatedAfterCommit(Product product) {
+        ProductSearchEvent event = toProductSearchEvent(product);
+        publishAfterCommit(() -> productEventPublisher.publishProductUpdated(event));
+    }
+
     private void publishProductSoldAfterCommit(Product product) {
         ProductSoldEvent event = ProductSoldEvent.builder()
                 .productId(product.getId())
@@ -183,17 +213,32 @@ public class ProductServiceImpl implements ProductService {
                 .title(product.getTitle())
                 .build();
 
+        publishAfterCommit(() -> productEventPublisher.publishProductSold(event));
+    }
+
+    private void publishAfterCommit(Runnable action) {
         if (!TransactionSynchronizationManager.isSynchronizationActive()) {
-            productEventPublisher.publishProductSold(event);
+            action.run();
             return;
         }
 
         TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
             @Override
             public void afterCommit() {
-                productEventPublisher.publishProductSold(event);
+                action.run();
             }
         });
+    }
+
+    private ProductSearchEvent toProductSearchEvent(Product product) {
+        return ProductSearchEvent.builder()
+                .id(product.getId())
+                .title(product.getTitle())
+                .description(product.getDescription())
+                .price(product.getPrice())
+                .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
+                .status(product.getStatus() != null ? product.getStatus().name() : null)
+                .build();
     }
 
     private Category resolveCategory(Long categoryId) {

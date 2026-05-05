@@ -12,8 +12,8 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.stereotype.Component;
@@ -23,16 +23,28 @@ import org.springframework.web.client.RestClientException;
 
 @Slf4j
 @Component
-@RequiredArgsConstructor
 public class ProductServiceClient implements ProductClient {
 
     private static final int MAX_PROMPT_PRODUCTS = 5;
     private static final String ACTIVE_STATUS = "ACTIVE";
+    private static final String INTERNAL_SECRET_HEADER = "X-Internal-Secret";
 
-    @Qualifier("productServiceRestClient")
     private final RestClient productServiceRestClient;
     private final ProductServiceProperties productServiceProperties;
     private final ProductKeywordExtractor productKeywordExtractor;
+    private final String internalSharedSecret;
+
+    public ProductServiceClient(
+            @Qualifier("productServiceRestClient") RestClient productServiceRestClient,
+            ProductServiceProperties productServiceProperties,
+            ProductKeywordExtractor productKeywordExtractor,
+            @Value("${internal.security.secret:}") String internalSharedSecret
+    ) {
+        this.productServiceRestClient = productServiceRestClient;
+        this.productServiceProperties = productServiceProperties;
+        this.productKeywordExtractor = productKeywordExtractor;
+        this.internalSharedSecret = internalSharedSecret;
+    }
 
     @Override
     public List<ProductCatalogItem> findRelevantProducts(List<String> keywords, String userId) {
@@ -65,6 +77,7 @@ public class ProductServiceClient implements ProductClient {
                             .queryParam("status", ACTIVE_STATUS)
                             .build())
                     .header("X-User-Id", userId)
+                    .header(INTERNAL_SECRET_HEADER, internalSharedSecret)
                     .retrieve()
                     .body(new ParameterizedTypeReference<>() {
                     });
