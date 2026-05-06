@@ -3,6 +3,7 @@ package com.hsmart.backend.presentation.controllers;
 import com.hsmart.backend.application.dto.ApiResponse;
 import com.hsmart.backend.application.dto.UpdateProfileRequestDTO;
 import com.hsmart.backend.application.dto.UserProfileResponseDTO;
+import com.hsmart.backend.application.dto.UserStatsResponseDTO;
 import com.hsmart.backend.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -49,5 +50,11 @@ public class UserController {
     ) {
         UserProfileResponseDTO response = userService.updateProfile(authentication.getName(), request);
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Profile updated successfully", response));
+    }
+
+    @GetMapping("/internal/stats")
+    public ResponseEntity<ApiResponse<UserStatsResponseDTO>> getInternalStats() {
+        UserStatsResponseDTO response = userService.getUserStats();
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "User stats fetched successfully", response));
     }
 }

@@ -32,6 +32,7 @@ Current responsibilities:
 - `/api/v1/search/**` -> `lb://search-service`
 - `/api/v1/orders/**` -> `lb://order-service`
 - `/api/v1/reviews/**` -> `lb://review-service`
+- `/api/v1/admin/**` -> `lb://admin-service`
 - `/api/v1/predict/**` -> `ai-service`
 - `/api/v1/assistant/**` -> `lb://interaction-service`
 - `/api/v1/interactions/**` -> `lb://interaction-service`
@@ -47,6 +48,7 @@ Static downstream URLs were removed for:
 - `search-service`
 - `order-service`
 - `review-service`
+- `admin-service`
 
 The prediction route still uses `AI_SERVICE_URL` because `ai-service` is not currently a Spring Boot Eureka client.
 
@@ -79,6 +81,7 @@ Expected downstream service IDs:
 - `search-service`
 - `order-service`
 - `review-service`
+- `admin-service`
 
 Circuit breaker filters remain attached to the gateway routes after switching to `lb://` URIs:
 
@@ -181,8 +184,11 @@ Current behavior:
 - requires `Authorization: Bearer <token>` for protected routes
 - supports `?token=<jwt>` for WebSocket handshake requests under `/api/v1/interactions/ws/**`
 - validates JWT signature and expiration using the shared `JWT_SECRET`
+- reads the JWT `role` claim
 - writes `401 Unauthorized` JSON when the token is missing or invalid
-- forwards `X-User-Id` to downstream services after successful validation
+- forwards `X-User-Id` and `X-User-Role` to downstream services after successful validation
+- requires `role=ADMIN` for `/api/v1/admin/**`
+- returns `403 Forbidden` with message `Admin role is required` when a non-admin calls admin routes
 
 Current header-forwarding note:
 

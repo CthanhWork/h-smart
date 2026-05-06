@@ -3,6 +3,7 @@ package com.hsmart.order.presentation.controllers;
 import com.hsmart.order.application.dto.ApiResponse;
 import com.hsmart.order.application.dto.CreateOrderRequestDTO;
 import com.hsmart.order.application.dto.OrderResponseDTO;
+import com.hsmart.order.application.dto.OrderStatsResponseDTO;
 import com.hsmart.order.application.exceptions.MissingUserContextException;
 import com.hsmart.order.service.OrderService;
 import jakarta.validation.Valid;
@@ -48,6 +49,12 @@ public class OrderController {
     public ResponseEntity<ApiResponse<OrderResponseDTO>> getOrder(@PathVariable Long id) {
         OrderResponseDTO response = orderService.getOrder(id);
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Order fetched successfully", response));
+    }
+
+    @GetMapping("/internal/stats")
+    public ResponseEntity<ApiResponse<OrderStatsResponseDTO>> getInternalStats() {
+        OrderStatsResponseDTO response = orderService.getOrderStats();
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Order stats fetched successfully", response));
     }
 
     private String requireUserId(String userId) {

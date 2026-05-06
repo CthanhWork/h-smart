@@ -1,6 +1,8 @@
 package com.hsmart.backend.application.dto;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.List;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -17,4 +19,8 @@ public class ProductSearchEvent {
     private BigDecimal price;
     private String categoryName;
     private String status;
+    private String sellerId;
+
+    @Builder.Default
+    private List<DetectionDTO> aiMetadata = new ArrayList<>();
 }

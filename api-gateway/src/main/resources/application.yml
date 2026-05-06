@@ -47,6 +47,10 @@ spring:
           uri: lb://review-service
           predicates:
             - Path=/api/v1/reviews/**
+        - id: admin-route
+          uri: lb://admin-service
+          predicates:
+            - Path=/api/v1/admin/**
         - id: predict-route
           uri: ${AI_SERVICE_URL:http://ai-service:8000}
           predicates:

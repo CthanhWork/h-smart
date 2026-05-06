@@ -2,6 +2,7 @@ package com.hsmart.backend.service.impl;
 
 import com.hsmart.backend.application.dto.UpdateProfileRequestDTO;
 import com.hsmart.backend.application.dto.UserProfileResponseDTO;
+import com.hsmart.backend.application.dto.UserStatsResponseDTO;
 import com.hsmart.backend.application.mapper.UserMapper;
 import com.hsmart.backend.domain.entities.User;
 import com.hsmart.backend.infrastructure.exception.ResourceNotFoundException;
@@ -33,5 +34,13 @@ public class UserServiceImpl implements UserService {
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         userMapper.updateProfile(request, user);
         return userMapper.toProfileResponse(userRepository.save(user));
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public UserStatsResponseDTO getUserStats() {
+        return UserStatsResponseDTO.builder()
+                .totalUsers(userRepository.count())
+                .build();
     }
 }

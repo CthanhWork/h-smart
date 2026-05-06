@@ -1,0 +1,76 @@
+server:
+  port: ${SERVER_PORT:8087}
+
+spring:
+  application:
+    name: admin-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://admin-postgres-db:5432/hsmart_admin_db}
+    username: ${SPRING_DATASOURCE_USERNAME:hsmart}
+    password: ${SPRING_DATASOURCE_PASSWORD:hsmart_password}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+  rabbitmq:
+    host: ${SPRING_RABBITMQ_HOST:rabbitmq}
+    port: ${SPRING_RABBITMQ_PORT:5672}
+    username: ${SPRING_RABBITMQ_USERNAME:hsmart}
+    password: ${SPRING_RABBITMQ_PASSWORD:hsmart_password}
+    listener:
+      simple:
+        retry:
+          enabled: true
+          initial-interval: 1s
+          max-attempts: 3
+          max-interval: 5s
+          multiplier: 2
+
+product-service:
+  base-url: ${PRODUCT_SERVICE_BASE_URL:http://product-service}
+  connect-timeout-ms: ${PRODUCT_SERVICE_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${PRODUCT_SERVICE_READ_TIMEOUT_MS:3000}
+
+user-service:
+  base-url: ${USER_SERVICE_BASE_URL:http://user-service}
+  connect-timeout-ms: ${USER_SERVICE_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${USER_SERVICE_READ_TIMEOUT_MS:3000}
+
+order-service:
+  base-url: ${ORDER_SERVICE_BASE_URL:http://order-service}
+  connect-timeout-ms: ${ORDER_SERVICE_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${ORDER_SERVICE_READ_TIMEOUT_MS:3000}
+
+internal:
+  security:
+    enabled: ${INTERNAL_SECURITY_ENABLED:true}
+    secret: ${INTERNAL_SHARED_SECRET:}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://discovery-server:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${server.port}
+
+logging:
+  logstash:
+    host: ${LOGSTASH_HOST:localhost}
+    port: ${LOGSTASH_PORT:5044}
+  level:
+    com.hsmart.admin: INFO
+
+management:
+  tracing:
+    sampling:
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
+  zipkin:
+    tracing:
+      endpoint: ${MANAGEMENT_ZIPKIN_TRACING_ENDPOINT:http://localhost:9411/api/v2/spans}

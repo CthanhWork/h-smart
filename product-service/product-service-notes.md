@@ -98,6 +98,8 @@ Fields:
 Status values:
 
 - `ACTIVE`
+- `APPROVED`
+- `PENDING_REVIEW`
 - `SOLD`
 - `HIDDEN`
 
@@ -191,6 +193,8 @@ Search synchronization events:
   - `price`
   - `categoryName`
   - `status`
+  - `sellerId`
+  - `aiMetadata`
 
 Publish behavior:
 
@@ -205,6 +209,48 @@ Publish behavior:
 - when `order.event.completed` is consumed, the product is marked as `SOLD`
 - duplicate order completion events for products that are already `SOLD` are skipped
 - order-driven product status changes publish `product.event.updated` for search sync and `product.event.sold` for seller notification
+
+## Admin Auto-Moderation Support
+
+`product-service` publishes enough product data for `admin-service` to moderate new listings asynchronously.
+
+Moderation event source:
+
+- exchange: `product.exchange`
+- routing key: `product.event.created`
+- payload: `ProductSearchEvent`
+
+Additional payload fields for moderation:
+
+- `sellerId`
+- `aiMetadata`
+
+Internal moderation endpoint:
+
+- `PUT /api/v1/products/internal/{id}/moderation-status`
+
+Expected request body:
+
+```json
+{
+  "status": "APPROVED"
+}
+```
+
+Behavior:
+
+- `admin-service` calls this endpoint with `X-Internal-Secret`
+- status can be moved to `APPROVED` or `PENDING_REVIEW`
+- moderation status updates publish `product.event.updated` for `search-service`
+- public seller create/update requests cannot assign `APPROVED` or `PENDING_REVIEW`; those statuses are reserved for `admin-service`
+
+Internal stats endpoint:
+
+- `GET /api/v1/products/internal/stats`
+
+Returned data:
+
+- `totalSellingProducts`: count of non-deleted products with status `ACTIVE` or `APPROVED`
 
 ## Smart Naming
 

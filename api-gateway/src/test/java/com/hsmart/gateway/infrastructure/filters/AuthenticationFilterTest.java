@@ -9,7 +9,9 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hsmart.gateway.infrastructure.config.JwtService;
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
+import io.jsonwebtoken.Jwts;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.Test;
@@ -150,7 +152,7 @@ class AuthenticationFilterTest {
                         .build()
         );
 
-        when(jwtService.extractUsername("invalid-token")).thenThrow(new JwtException("Invalid token"));
+        when(jwtService.parseClaims("invalid-token")).thenThrow(new JwtException("Invalid token"));
 
         AtomicBoolean chainCalled = new AtomicBoolean(false);
         GatewayFilterChain chain = serverWebExchange -> {
@@ -174,7 +176,7 @@ class AuthenticationFilterTest {
                         .build()
         );
 
-        when(jwtService.extractUsername("valid-token")).thenReturn("nguyenvana");
+        when(jwtService.parseClaims("valid-token")).thenReturn(claims("nguyenvana", "USER"));
 
         AtomicReference<ServerWebExchange> forwardedExchange = new AtomicReference<>();
         GatewayFilterChain chain = serverWebExchange -> {
@@ -186,6 +188,7 @@ class AuthenticationFilterTest {
         filter.filter(exchange, chain).block();
 
         assertEquals("nguyenvana", forwardedExchange.get().getRequest().getHeaders().getFirst("X-User-Id"));
+        assertEquals("USER", forwardedExchange.get().getRequest().getHeaders().getFirst("X-User-Role"));
     }
 
     @Test
@@ -194,7 +197,7 @@ class AuthenticationFilterTest {
                 MockServerHttpRequest.get("/api/v1/interactions/ws?token=ws-valid-token").build()
         );
 
-        when(jwtService.extractUsername("ws-valid-token")).thenReturn("buyer-1");
+        when(jwtService.parseClaims("ws-valid-token")).thenReturn(claims("buyer-1", "USER"));
 
         AtomicReference<ServerWebExchange> forwardedExchange = new AtomicReference<>();
         GatewayFilterChain chain = serverWebExchange -> {
@@ -206,5 +209,59 @@ class AuthenticationFilterTest {
         filter.filter(exchange, chain).block();
 
         assertEquals("buyer-1", forwardedExchange.get().getRequest().getHeaders().getFirst("X-User-Id"));
+    }
+
+    @Test
+    void shouldRejectAdminRouteWhenRoleIsNotAdmin() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/admin/stats/overview")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer user-token")
+                        .build()
+        );
+
+        when(jwtService.parseClaims("user-token")).thenReturn(claims("buyer-1", "USER"));
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertFalse(chainCalled.get());
+        assertEquals(403, exchange.getResponse().getStatusCode().value());
+        assertTrue(exchange.getResponse().getBodyAsString().block().contains("\"message\":\"Admin role is required\""));
+    }
+
+    @Test
+    void shouldForwardAdminRouteWhenRoleIsAdmin() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/admin/stats/overview")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer admin-token")
+                        .build()
+        );
+
+        when(jwtService.parseClaims("admin-token")).thenReturn(claims("admin-1", "ADMIN"));
+
+        AtomicReference<ServerWebExchange> forwardedExchange = new AtomicReference<>();
+        GatewayFilterChain chain = serverWebExchange -> {
+            forwardedExchange.set(serverWebExchange);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertEquals("admin-1", forwardedExchange.get().getRequest().getHeaders().getFirst("X-User-Id"));
+        assertEquals("ADMIN", forwardedExchange.get().getRequest().getHeaders().getFirst("X-User-Role"));
+    }
+
+    private Claims claims(String subject, String role) {
+        return Jwts.claims()
+                .subject(subject)
+                .add("role", role)
+                .build();
     }
 }

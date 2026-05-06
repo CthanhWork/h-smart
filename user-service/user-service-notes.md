@@ -198,6 +198,7 @@ Chuc nang:
 - `/swagger-ui/**`
 - `/v3/api-docs/**`
 - `/health`
+- `/api/v1/users/internal/**`
 - `/error`
 
 ### Bao ve hien tai
@@ -205,6 +206,22 @@ Chuc nang:
 - Tat ca endpoint ngoai whitelist deu can JWT
 - Unauthorized tra `ApiResponse<Void>`
 - Forbidden tra `ApiResponse<Void>`
+
+## 10.1 Internal Admin Stats
+
+`admin-service` doc so lieu user thong qua endpoint noi bo:
+
+- `GET /api/v1/users/internal/stats`
+
+Endpoint nay:
+
+- chi chap nhan request co `X-Internal-Secret` hop le
+- nam trong whitelist Spring Security de service-to-service call khong can JWT
+- tra ve `ApiResponse<UserStatsResponseDTO>`
+
+Response data:
+
+- `totalUsers`
 
 ## 11. Swagger / OpenAPI
 

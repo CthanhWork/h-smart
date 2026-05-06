@@ -3,6 +3,7 @@ package com.hsmart.order.service.impl;
 import com.hsmart.order.application.dto.CreateOrderRequestDTO;
 import com.hsmart.order.application.dto.OrderCompletedEvent;
 import com.hsmart.order.application.dto.OrderResponseDTO;
+import com.hsmart.order.application.dto.OrderStatsResponseDTO;
 import com.hsmart.order.application.dto.ProductResponseDTO;
 import com.hsmart.order.application.exceptions.OrderNotFoundException;
 import com.hsmart.order.application.exceptions.OrderStateException;
@@ -28,6 +29,7 @@ import org.springframework.util.StringUtils;
 public class OrderServiceImpl implements OrderService {
 
     private static final String ACTIVE_STATUS = "ACTIVE";
+    private static final String APPROVED_STATUS = "APPROVED";
 
     private final OrderRepository orderRepository;
     private final ProductClient productClient;
@@ -84,8 +86,17 @@ public class OrderServiceImpl implements OrderService {
         return toResponse(order);
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public OrderStatsResponseDTO getOrderStats() {
+        return OrderStatsResponseDTO.builder()
+                .completedOrderCount(orderRepository.countByStatus(OrderStatus.COMPLETED))
+                .totalCompletedRevenue(orderRepository.sumAmountByStatus(OrderStatus.COMPLETED))
+                .build();
+    }
+
     private void validateProductCanBeOrdered(ProductResponseDTO product, String buyerId) {
-        if (product.id() == null || !ACTIVE_STATUS.equalsIgnoreCase(product.status())) {
+        if (product.id() == null || !isOrderableStatus(product.status())) {
             throw new ProductUnavailableException("Product is not available for ordering");
         }
 
@@ -100,6 +111,10 @@ public class OrderServiceImpl implements OrderService {
         if (product.price() == null) {
             throw new ProductUnavailableException("Product price is missing");
         }
+    }
+
+    private boolean isOrderableStatus(String status) {
+        return ACTIVE_STATUS.equalsIgnoreCase(status) || APPROVED_STATUS.equalsIgnoreCase(status);
     }
 
     private void publishAfterCommit(Runnable action) {

@@ -9,6 +9,7 @@ import com.hsmart.backend.application.dto.ProductRequestDTO;
 import com.hsmart.backend.application.dto.ProductResponseDTO;
 import com.hsmart.backend.application.dto.ProductSearchEvent;
 import com.hsmart.backend.application.dto.ProductSoldEvent;
+import com.hsmart.backend.application.dto.ProductStatsResponseDTO;
 import com.hsmart.backend.application.exceptions.CategoryNotFoundException;
 import com.hsmart.backend.application.exceptions.FileProcessingException;
 import com.hsmart.backend.application.exceptions.MissingUserContextException;
@@ -34,6 +35,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.util.Collections;
+import java.util.EnumSet;
 import java.util.List;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
@@ -46,6 +48,8 @@ import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.util.StringUtils;
 import org.springframework.web.multipart.MultipartFile;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
 
 @Slf4j
 @Service
@@ -72,6 +76,7 @@ public class ProductServiceImpl implements ProductService {
         String aiMetadataJson = objectMapper.writeValueAsString(predictResponse.getDetections());
         String relativeImageUrl = saveUploadedFile(image);
         String resolvedTitle = productNamingSupport.resolveTitle(request.getTitle(), predictResponse.getDetections());
+        validateClientManagedStatus(request.getStatus());
         ProductStatus resolvedStatus = request.getStatus() != null ? request.getStatus() : ProductStatus.ACTIVE;
 
         Product product = productMapper.toEntity(
@@ -99,6 +104,7 @@ public class ProductServiceImpl implements ProductService {
         ProductStatus previousStatus = product.getStatus();
 
         Category category = resolveCategory(request.getCategoryId());
+        validateClientManagedStatus(request.getStatus());
         product.setTitle(resolveUpdatedTitle(product, request));
         product.setDescription(request.getDescription());
         product.setPrice(request.getPrice());
@@ -162,6 +168,33 @@ public class ProductServiceImpl implements ProductService {
         log.info("Marked product {} as SOLD from order completion event", savedProduct.getId());
     }
 
+    @Override
+    public ProductResponseDTO updateModerationStatus(Long id, ProductStatus status) {
+        Product product = getActiveProduct(id);
+        ProductStatus previousStatus = product.getStatus();
+
+        product.setStatus(status);
+        Product savedProduct = productRepository.save(product);
+        publishProductUpdatedAfterCommit(savedProduct);
+        if (isTransitionToSold(previousStatus, savedProduct.getStatus())) {
+            publishProductSoldAfterCommit(savedProduct);
+        }
+
+        log.info("Updated product {} moderation status to {}", savedProduct.getId(), savedProduct.getStatus());
+        return toProductResponse(savedProduct);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ProductStatsResponseDTO getProductStats() {
+        long totalSellingProducts = productRepository.countByIsDeletedFalseAndStatusIn(
+                EnumSet.of(ProductStatus.ACTIVE, ProductStatus.APPROVED)
+        );
+        return ProductStatsResponseDTO.builder()
+                .totalSellingProducts(totalSellingProducts)
+                .build();
+    }
+
     private String getCurrentUserId() {
         return UserContextHolder.getCurrentUserId()
                 .orElseThrow(MissingUserContextException::new);
@@ -194,6 +227,15 @@ public class ProductServiceImpl implements ProductService {
 
     private boolean isTransitionToSold(ProductStatus previousStatus, ProductStatus currentStatus) {
         return previousStatus != ProductStatus.SOLD && currentStatus == ProductStatus.SOLD;
+    }
+
+    private void validateClientManagedStatus(ProductStatus status) {
+        if (status == ProductStatus.APPROVED || status == ProductStatus.PENDING_REVIEW) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Moderation statuses can only be assigned by admin-service"
+            );
+        }
     }
 
     private void publishProductCreatedAfterCommit(Product product) {
@@ -238,6 +280,8 @@ public class ProductServiceImpl implements ProductService {
                 .price(product.getPrice())
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
                 .status(product.getStatus() != null ? product.getStatus().name() : null)
+                .sellerId(product.getSellerId())
+                .aiMetadata(parseAiMetadata(product.getAiMetadata()))
                 .build();
     }
 

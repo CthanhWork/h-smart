@@ -1428,3 +1428,54 @@
 - Documentation rule going forward:
   - new service documentation should use `<service-name>-notes.md`
   - this keeps service notes easy to identify when several files are open at the same time
+
+[2026-05-05] Admin service introduced as "Mắt thần quản trị"
+
+- Added `admin-service` on port `8087`.
+- Runtime and platform:
+  - Spring Boot 3
+  - Java 17
+  - PostgreSQL database `hsmart_admin_db`
+  - Eureka Client registration as `admin-service`
+  - Zipkin tracing and Logstash JSON logging
+  - Docker JVM memory: `-Xms256m -Xmx384m`
+  - Docker `mem_limit: 400m`
+- Added Docker Compose services:
+  - `h-smart-admin-postgres-db`
+  - `h-smart-admin-service`
+- Added documentation file:
+  - `admin-service/admin-service-notes.md`
+- Added product auto-moderation flow:
+  - `admin-service` listens to `product.exchange`
+  - queue: `admin.product.moderation.queue`
+  - routing key: `product.event.created`
+  - reads `aiMetadata` from product creation events
+  - marks product `APPROVED` when the best AI label matches the selected category with confidence `>= 0.6`
+  - marks product `PENDING_REVIEW` and creates an admin notification when confidence is low, no label is detected, selected category is missing, or the label does not match
+  - logs auto-rejected cases in English
+- Updated `product-service`:
+  - added product statuses `APPROVED` and `PENDING_REVIEW`
+  - extended `ProductSearchEvent` with `sellerId` and `aiMetadata`
+  - added internal endpoint `PUT /api/v1/products/internal/{id}/moderation-status`
+  - added internal endpoint `GET /api/v1/products/internal/stats`
+  - selling product count now treats `ACTIVE` and `APPROVED` as sellable states
+  - public seller create/update requests cannot assign moderation-only statuses directly
+- Updated `order-service`:
+  - orders can be created for products with status `ACTIVE` or `APPROVED`
+  - added internal endpoint `GET /api/v1/orders/internal/stats`
+  - returns completed order count and total completed revenue
+- Updated `user-service`:
+  - added internal endpoint `GET /api/v1/users/internal/stats`
+  - returns total user count
+- Updated `api-gateway`:
+  - added route `/api/v1/admin/** -> lb://admin-service`
+  - reads JWT `role` claim
+  - forwards `X-User-Role`
+  - rejects non-admin callers on admin routes with `403` and message `Admin role is required`
+- Added admin analytics endpoint:
+  - `GET /api/v1/admin/stats/overview`
+  - returns total users, total selling products, and total completed revenue through the standard `ApiResponse<T>` contract
+- Verification:
+  - `mvn test` passed for `admin-service`
+  - targeted `mvn test` passed for `api-gateway`, `product-service`, `order-service`, `user-service`, `interaction-service`, and `search-service`
+  - `docker compose config --quiet` passed with `INTERNAL_SHARED_SECRET` supplied from the shell

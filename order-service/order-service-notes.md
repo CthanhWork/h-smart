@@ -6,7 +6,7 @@
 
 Current scope:
 
-- create pending orders for active products
+- create pending orders for active or admin-approved products
 - complete pending orders
 - publish order completion events through RabbitMQ
 - register with Eureka as `order-service`
@@ -53,6 +53,7 @@ Status values:
 - `POST /api/v1/orders`
 - `POST /api/v1/orders/{id}/complete`
 - `GET /api/v1/orders/{id}`
+- `GET /api/v1/orders/internal/stats`
 
 All order endpoints are protected at `api-gateway` and require JWT authentication.
 
@@ -73,7 +74,7 @@ Behavior:
 - gateway forwards `X-User-Id` and `X-Internal-Secret`
 - `order-service` reads `buyerId` from `X-User-Id`
 - `order-service` calls `product-service` through load-balanced `RestClient`
-- product must exist and have status `ACTIVE`
+- product must exist and have status `ACTIVE` or `APPROVED`
 - order amount is copied from the current product price
 - order is saved with status `PENDING`
 
@@ -113,6 +114,17 @@ Review eligibility requires:
 
 - order status is `COMPLETED`
 - order `buyerId` matches the current reviewer
+
+## Admin Analytics Support
+
+`admin-service` reads completed order revenue from:
+
+- `GET /api/v1/orders/internal/stats`
+
+The endpoint requires `X-Internal-Secret` and returns:
+
+- `completedOrderCount`
+- `totalCompletedRevenue`
 
 ## Observability
 

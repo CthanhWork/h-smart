@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hsmart.gateway.application.dto.ApiResponse;
 import com.hsmart.gateway.infrastructure.config.JwtService;
+import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -27,7 +28,9 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
 
     private static final String BEARER_PREFIX = "Bearer ";
     private static final String INVALID_TOKEN_MESSAGE = "Invalid or missing security token";
+    private static final String ADMIN_REQUIRED_MESSAGE = "Admin role is required";
     private static final String WEBSOCKET_PATH_PREFIX = "/api/v1/interactions/ws";
+    private static final String ADMIN_PATH_PREFIX = "/api/v1/admin/";
     private static final List<String> PUBLIC_PATHS = List.of(
             "/api/v1/auth/**",
             "/api/v1/products/media/**",
@@ -73,14 +76,21 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
             }
 
             try {
-                String username = jwtService.extractUsername(token);
+                Claims claims = jwtService.parseClaims(token);
+                String username = claims.getSubject();
                 if (username == null || username.isBlank()) {
                     log.warn("Authentication rejected for path {} because the token subject is missing", path);
                     return writeUnauthorizedResponse(exchange);
                 }
+                String role = resolveRole(claims);
+                if (path.startsWith(ADMIN_PATH_PREFIX) && !"ADMIN".equalsIgnoreCase(role)) {
+                    log.warn("Authorization rejected for path {} because the caller role is not ADMIN", path);
+                    return writeForbiddenResponse(exchange);
+                }
 
                 ServerHttpRequest mutatedRequest = exchange.getRequest().mutate()
                         .header("X-User-Id", username)
+                        .header("X-User-Role", role)
                         .build();
 
                 log.info("Authentication successful for path {}. Forwarding X-User-Id header", path);
@@ -125,6 +135,20 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
         byte[] payload = toJsonBytes(ApiResponse.error(HttpStatus.UNAUTHORIZED.value(), INVALID_TOKEN_MESSAGE));
         DataBuffer buffer = exchange.getResponse().bufferFactory().wrap(payload);
         return exchange.getResponse().writeWith(Mono.just(buffer));
+    }
+
+    private Mono<Void> writeForbiddenResponse(ServerWebExchange exchange) {
+        exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
+        exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
+
+        byte[] payload = toJsonBytes(ApiResponse.error(HttpStatus.FORBIDDEN.value(), ADMIN_REQUIRED_MESSAGE));
+        DataBuffer buffer = exchange.getResponse().bufferFactory().wrap(payload);
+        return exchange.getResponse().writeWith(Mono.just(buffer));
+    }
+
+    private String resolveRole(Claims claims) {
+        Object role = claims.get("role");
+        return role == null ? "" : role.toString();
     }
 
     private byte[] toJsonBytes(ApiResponse<Void> body) {

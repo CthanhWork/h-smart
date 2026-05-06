@@ -2,6 +2,7 @@ package com.hsmart.backend.infrastructure.persistence;
 
 import com.hsmart.backend.domain.entities.Product;
 import com.hsmart.backend.domain.entities.ProductStatus;
+import java.util.Collection;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -35,4 +36,6 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     );
 
     Optional<Product> findByIdAndIsDeletedFalse(Long id);
+
+    long countByIsDeletedFalseAndStatusIn(Collection<ProductStatus> statuses);
 }

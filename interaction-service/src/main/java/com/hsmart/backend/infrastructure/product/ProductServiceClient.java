@@ -27,6 +27,7 @@ public class ProductServiceClient implements ProductClient {
 
     private static final int MAX_PROMPT_PRODUCTS = 5;
     private static final String ACTIVE_STATUS = "ACTIVE";
+    private static final String APPROVED_STATUS = "APPROVED";
     private static final String INTERNAL_SECRET_HEADER = "X-Internal-Secret";
 
     private final RestClient productServiceRestClient;
@@ -67,14 +68,27 @@ public class ProductServiceClient implements ProductClient {
 
     private List<ProductCatalogItem> fetchProducts(String keyword, String userId) {
         try {
-            ApiResponse<ProductPageResponse<ProductResponse>> response = productServiceRestClient.get()
+            List<ProductCatalogItem> activeProducts = fetchProductsByStatus(keyword, userId, ACTIVE_STATUS);
+            List<ProductCatalogItem> approvedProducts = fetchProductsByStatus(keyword, userId, APPROVED_STATUS);
+            List<ProductCatalogItem> products = new ArrayList<>();
+            products.addAll(activeProducts);
+            products.addAll(approvedProducts);
+            return products;
+        } catch (RestClientException exception) {
+            log.warn("Product catalog request failed while searching keyword {}", keyword, exception);
+            throw new ProductCatalogUnavailableException("Product catalog is unavailable", exception);
+        }
+    }
+
+    private List<ProductCatalogItem> fetchProductsByStatus(String keyword, String userId, String status) {
+        ApiResponse<ProductPageResponse<ProductResponse>> response = productServiceRestClient.get()
                     .uri(uriBuilder -> uriBuilder
                             .path("/api/v1/products")
                             .queryParam("page", 0)
                             .queryParam("size", productServiceProperties.pageSize())
                             .queryParam("sort", "id,desc")
                             .queryParam("keyword", keyword)
-                            .queryParam("status", ACTIVE_STATUS)
+                            .queryParam("status", status)
                             .build())
                     .header("X-User-Id", userId)
                     .header(INTERNAL_SECRET_HEADER, internalSharedSecret)
@@ -88,13 +102,9 @@ public class ProductServiceClient implements ProductClient {
 
             return response.getData().content().stream()
                     .filter(Objects::nonNull)
-                    .filter(product -> product.status() == null || ACTIVE_STATUS.equalsIgnoreCase(product.status()))
+                    .filter(product -> product.status() == null || status.equalsIgnoreCase(product.status()))
                     .map(this::toCatalogItem)
                     .toList();
-        } catch (RestClientException exception) {
-            log.warn("Product catalog request failed while searching keyword {}", keyword, exception);
-            throw new ProductCatalogUnavailableException("Product catalog is unavailable", exception);
-        }
     }
 
     private ProductCatalogItem toCatalogItem(ProductResponse product) {

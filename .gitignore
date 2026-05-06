@@ -38,6 +38,8 @@ ai-service/tests/output/
 # Tests
 **/src/test/
 **/tests/
+!admin-service/src/test/
+!admin-service/src/test/**
 
 # Internal notes / reports / guides
 agent.md
