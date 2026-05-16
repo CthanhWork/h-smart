@@ -57,6 +57,14 @@ public class OrderController {
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Order stats fetched successfully", response));
     }
 
+    @GetMapping("/internal/latest")
+    public ResponseEntity<ApiResponse<OrderResponseDTO>> getLatestOrder(
+            @RequestHeader(value = "X-User-Id", required = false) String buyerId
+    ) {
+        OrderResponseDTO response = orderService.getLatestOrderForBuyer(requireUserId(buyerId));
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Latest order fetched successfully", response));
+    }
+
     private String requireUserId(String userId) {
         if (!StringUtils.hasText(userId)) {
             throw new MissingUserContextException();

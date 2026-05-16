@@ -4,8 +4,11 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "assistant")
 public record AssistantProperties(
-        String baseUrl,
+        String providerUrl,
+        String apiKey,
         String model,
+        int connectTimeoutMs,
+        int readTimeoutMs,
         int historyLimit,
         String assistantId,
         String systemPrompt

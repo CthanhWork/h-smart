@@ -88,6 +88,14 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional(readOnly = true)
+    public OrderResponseDTO getLatestOrderForBuyer(String buyerId) {
+        Order order = orderRepository.findFirstByBuyerIdOrderByCreatedAtDescIdDesc(buyerId)
+                .orElseThrow(() -> new OrderNotFoundException("No orders found for buyer " + buyerId));
+        return toResponse(order);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public OrderStatsResponseDTO getOrderStats() {
         return OrderStatsResponseDTO.builder()
                 .completedOrderCount(orderRepository.countByStatus(OrderStatus.COMPLETED))

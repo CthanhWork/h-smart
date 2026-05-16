@@ -13,11 +13,8 @@ from app.presentation.api.routes.predict import router as predict_router
 async def lifespan(app: FastAPI):
     settings = get_settings()
     detector = Detectron2Detector(
-        config_path=settings.config_path,
         model_path=settings.model_path,
-        classes_path=settings.classes_path,
         score_threshold=settings.score_threshold,
-        device=settings.device,
     )
     app.state.detector = detector
     app.state.predict_image_use_case = PredictImageUseCase(detector=detector)

@@ -1,9 +1,7 @@
 # Models
 
-Dat cac file model da export vao day:
+Place the trained Detectron2 checkpoint here:
 
 - `model.pth`
-- `config_infer.yaml`
-- `classes.json`
 
-Khong commit weight lon len git.
+Large model weights should not be committed to git.

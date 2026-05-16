@@ -1,6 +1,9 @@
 package com.hsmart.backend.infrastructure.config;
 
+import java.time.Duration;
 import org.springframework.beans.factory.annotation.Qualifier;
+import org.springframework.boot.web.client.ClientHttpRequestFactories;
+import org.springframework.boot.web.client.ClientHttpRequestFactorySettings;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.web.client.RestClient;
@@ -9,10 +12,36 @@ import org.springframework.web.client.RestClient;
 public class AssistantConfig {
 
     @Bean
-    @Qualifier("ollamaRestClient")
-    public RestClient ollamaRestClient(RestClient.Builder builder, AssistantProperties properties) {
+    @Qualifier("aiProviderRestClient")
+    public RestClient aiProviderRestClient(RestClient.Builder builder, AssistantProperties properties) {
+        ClientHttpRequestFactorySettings settings = ClientHttpRequestFactorySettings.DEFAULTS
+                .withConnectTimeout(Duration.ofMillis(resolveTimeout(properties.connectTimeoutMs(), 2_000)))
+                .withReadTimeout(Duration.ofMillis(resolveTimeout(properties.readTimeoutMs(), 60_000)));
+
         return builder
-                .baseUrl(properties.baseUrl())
+                .baseUrl(properties.providerUrl())
+                .requestFactory(ClientHttpRequestFactories.get(settings))
                 .build();
+    }
+
+    @Bean
+    @Qualifier("intentClassifierRestClient")
+    public RestClient intentClassifierRestClient(
+            RestClient.Builder builder,
+            AssistantProperties assistantProperties,
+            IntentClassifierProperties classifierProperties
+    ) {
+        ClientHttpRequestFactorySettings settings = ClientHttpRequestFactorySettings.DEFAULTS
+                .withConnectTimeout(Duration.ofMillis(resolveTimeout(classifierProperties.connectTimeoutMs(), 1_000)))
+                .withReadTimeout(Duration.ofMillis(resolveTimeout(classifierProperties.readTimeoutMs(), 5_000)));
+
+        return builder
+                .baseUrl(assistantProperties.providerUrl())
+                .requestFactory(ClientHttpRequestFactories.get(settings))
+                .build();
+    }
+
+    private long resolveTimeout(int configuredTimeoutMs, int fallbackTimeoutMs) {
+        return configuredTimeoutMs > 0 ? configuredTimeoutMs : fallbackTimeoutMs;
     }
 }

@@ -1,10 +1,11 @@
-FROM python:3.10-slim
+FROM python:3.9-slim
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     curl \
+    g++ \
     git \
     libgl1 \
     libglib2.0-0 \
@@ -12,19 +13,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libsm6 \
     libxext6 \
     libxrender1 \
+    libxrender-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
-ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
-ARG TORCH_VERSION=2.11.0+cpu
-ARG TORCHVISION_VERSION=0.26.0+cpu
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel \
-    && pip install --no-cache-dir --index-url ${TORCH_INDEX_URL} torch==${TORCH_VERSION} torchvision==${TORCHVISION_VERSION} \
-    && pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir --no-build-isolation --no-deps "git+https://github.com/facebookresearch/detectron2.git"
+RUN pip install --no-cache-dir --upgrade "pip<26" "setuptools<81" wheel packaging \
+    && pip install --no-cache-dir "numpy<2" \
+    && pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu torch==2.1.2+cpu torchvision==0.16.2+cpu \
+    && pip install --no-cache-dir --no-build-isolation -r requirements.txt
 
 COPY app ./app
 
 EXPOSE 8000
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["sh", "-c", "gunicorn app.main:app --worker-class uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000 --workers ${WEB_CONCURRENCY:-1} --threads ${GUNICORN_THREADS:-2} --timeout ${GUNICORN_TIMEOUT:-120}"]

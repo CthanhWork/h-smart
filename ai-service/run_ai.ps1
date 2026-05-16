@@ -29,7 +29,7 @@ function Get-BasePython {
         return @("python")
     }
 
-    throw "Khong tim thay Python tren may. Hay cai Python 3 truoc khi chay script."
+    throw "Python was not found. Install Python 3 before running this script."
 }
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -38,11 +38,9 @@ $VenvDir = Join-Path $ProjectRoot ".venv"
 $VenvPython = Join-Path $VenvDir "Scripts\python.exe"
 $RequirementsFile = Join-Path $ProjectRoot "requirements.txt"
 
-Write-Step "Kiem tra artifact model"
+Write-Step "Checking model artifacts"
 $RequiredFiles = @(
-    (Join-Path $ModelsDir "model.pth"),
-    (Join-Path $ModelsDir "config_infer.yaml"),
-    (Join-Path $ModelsDir "classes.json")
+    (Join-Path $ModelsDir "model.pth")
 )
 
 $MissingFiles = @()
@@ -53,31 +51,28 @@ foreach ($File in $RequiredFiles) {
 }
 
 if ($MissingFiles.Count -gt 0) {
-    Write-Host "Thieu file trong models/:" -ForegroundColor Red
+    Write-Host "Missing required files in models/:" -ForegroundColor Red
     $MissingFiles | ForEach-Object { Write-Host " - $_" -ForegroundColor Red }
-    throw "Dung lai vi artifact model chua day du."
+    throw "Model artifacts are incomplete."
 }
 
-Write-Step "Tao virtual environment neu chua co"
+Write-Step "Creating virtual environment when needed"
 if (-not (Test-Path $VenvPython)) {
     $BasePython = Get-BasePython
     if ($BasePython.Count -eq 2) {
-        Invoke-Checked -Command { & $BasePython[0] $BasePython[1] -m venv $VenvDir } -ErrorMessage "Khong tao duoc virtual environment."
+        Invoke-Checked -Command { & $BasePython[0] $BasePython[1] -m venv $VenvDir } -ErrorMessage "Unable to create virtual environment."
     } else {
-        Invoke-Checked -Command { & $BasePython[0] -m venv $VenvDir } -ErrorMessage "Khong tao duoc virtual environment."
+        Invoke-Checked -Command { & $BasePython[0] -m venv $VenvDir } -ErrorMessage "Unable to create virtual environment."
     }
 }
 
-Write-Step "Nang cap pip, setuptools, wheel"
-Invoke-Checked -Command { & $VenvPython -m pip install --upgrade pip setuptools wheel } -ErrorMessage "Khong nang cap duoc pip/setuptools/wheel."
+Write-Step "Upgrading pip, setuptools, and wheel"
+Invoke-Checked -Command { & $VenvPython -m pip install --upgrade pip setuptools wheel } -ErrorMessage "Unable to upgrade pip, setuptools, and wheel."
 
-Write-Step "Cai dependencies tu requirements.txt"
-Invoke-Checked -Command { & $VenvPython -m pip install -r $RequirementsFile } -ErrorMessage "Khong cai duoc dependencies tu requirements.txt."
+Write-Step "Installing dependencies from requirements.txt"
+Invoke-Checked -Command { & $VenvPython -m pip install --no-build-isolation -r $RequirementsFile } -ErrorMessage "Unable to install dependencies from requirements.txt."
 
-Write-Step "Cai detectron2"
-Invoke-Checked -Command { & $VenvPython -m pip install --no-build-isolation --no-deps "git+https://github.com/facebookresearch/detectron2.git" } -ErrorMessage "Khong cai duoc detectron2."
-
-Write-Step "Khoi chay ai-service"
+Write-Step "Starting ai-service"
 Push-Location $ProjectRoot
 try {
     & $VenvPython -m uvicorn app.main:app --host 0.0.0.0 --port 8000

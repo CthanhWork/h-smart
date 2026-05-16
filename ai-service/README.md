@@ -1,24 +1,21 @@
 # AI Service
 
-FastAPI service de phuc vu inference Detectron2.
+FastAPI service for Detectron2 household object detection.
 
-## Thu muc models
+## Models
 
-Can copy cac file sau vao `models/`:
+Place the trained Detectron2 checkpoint in `models/`:
 
 - `model.pth`
-- `config_infer.yaml`
-- `classes.json`
 
-Co the copy truc tiep tu bundle export cua Colab.
+The service uses the built-in Detectron2 `LVISv1-InstanceSegmentation/mask_rcnn_R_50_FPN_1x.yaml` base config and the 53-class label map in code.
 
-## Chay local
+## Local run
 
 ```powershell
 python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
-pip install --no-build-isolation --no-deps "git+https://github.com/facebookresearch/detectron2.git"
 uvicorn app.main:app --reload
 ```
 

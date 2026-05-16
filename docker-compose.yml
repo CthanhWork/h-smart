@@ -342,13 +342,26 @@ services:
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
       LOGSTASH_HOST: logstash
       LOGSTASH_PORT: "5044"
-      ASSISTANT_OLLAMA_BASE_URL: http://host.docker.internal:11434
-      ASSISTANT_OLLAMA_MODEL: qwen3:4b-instruct
+      AI_PROVIDER_URL: ${AI_PROVIDER_URL:-https://api.openai.com/v1}
+      AI_PROVIDER_API_KEY: ${AI_PROVIDER_API_KEY:?Set AI_PROVIDER_API_KEY in .env or shell before starting Docker Compose}
+      AI_PROVIDER_MODEL: ${AI_PROVIDER_MODEL:?Set AI_PROVIDER_MODEL in .env or shell before starting Docker Compose}
+      AI_PROVIDER_CONNECT_TIMEOUT_MS: "2000"
+      AI_PROVIDER_READ_TIMEOUT_MS: "60000"
+      ASSISTANT_INTENT_CLASSIFIER_CONNECT_TIMEOUT_MS: "1000"
+      ASSISTANT_INTENT_CLASSIFIER_READ_TIMEOUT_MS: "5000"
       ASSISTANT_HISTORY_LIMIT: "10"
       PRODUCT_SERVICE_BASE_URL: http://product-service
       PRODUCT_SERVICE_PAGE_SIZE: "30"
       PRODUCT_SERVICE_CONNECT_TIMEOUT_MS: "2000"
       PRODUCT_SERVICE_READ_TIMEOUT_MS: "3000"
+      ORDER_SERVICE_BASE_URL: http://order-service
+      ORDER_SERVICE_CONNECT_TIMEOUT_MS: "2000"
+      ORDER_SERVICE_READ_TIMEOUT_MS: "3000"
+      POLICY_SEARCH_BASE_URL: http://h-smart-elasticsearch:9200
+      POLICY_SEARCH_INDEX_NAME: hsmart-policy-index
+      POLICY_SEARCH_PAGE_SIZE: "2"
+      POLICY_SEARCH_CONNECT_TIMEOUT_MS: "1000"
+      POLICY_SEARCH_READ_TIMEOUT_MS: "3000"
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
       INTERNAL_SHARED_SECRET: ${INTERNAL_SHARED_SECRET:?Set INTERNAL_SHARED_SECRET in .env or shell before starting Docker Compose}
     depends_on:
@@ -357,6 +370,10 @@ services:
       interaction-mongo-db:
         condition: service_healthy
       rabbitmq:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      elasticsearch:
         condition: service_healthy
     ports:
       - "8083:8083"

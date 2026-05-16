@@ -7,3 +7,4 @@ class Detection:
     class_id: int
     score: float
     bbox: list[float]
+    translated_label: str

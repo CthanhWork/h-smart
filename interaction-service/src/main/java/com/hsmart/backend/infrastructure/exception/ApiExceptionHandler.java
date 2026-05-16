@@ -1,6 +1,7 @@
 package com.hsmart.backend.infrastructure.exception;
 
 import com.hsmart.backend.application.dto.ApiResponse;
+import com.hsmart.backend.application.exceptions.AssistantGatewayTimeoutException;
 import com.hsmart.backend.application.exceptions.AssistantServiceUnavailableException;
 import com.hsmart.backend.application.exceptions.InvalidInteractionRequestException;
 import com.hsmart.backend.application.exceptions.MissingUserContextException;
@@ -32,6 +33,12 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleAssistantUnavailable(AssistantServiceUnavailableException exception) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage()));
+    }
+
+    @ExceptionHandler(AssistantGatewayTimeoutException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAssistantGatewayTimeout(AssistantGatewayTimeoutException exception) {
+        return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT)
+                .body(ApiResponse.error(HttpStatus.GATEWAY_TIMEOUT, exception.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

@@ -21,7 +21,7 @@ function Get-ComposeCommand {
         return @("docker-compose")
     }
 
-    throw "Khong tim thay Docker Compose. Hay cai Docker Desktop hoac docker-compose truoc."
+    throw "Docker Compose was not found. Install Docker Desktop or docker-compose before running this script."
 }
 
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -29,15 +29,13 @@ $ComposeFile = Join-Path $ProjectRoot "docker-compose.yml"
 $ModelsDir = Join-Path $ProjectRoot "ai-service\\models"
 
 $RequiredFiles = @(
-    (Join-Path $ModelsDir "model.pth"),
-    (Join-Path $ModelsDir "config_infer.yaml"),
-    (Join-Path $ModelsDir "classes.json")
+    (Join-Path $ModelsDir "model.pth")
 )
 
-Write-Step "Kiem tra Docker Compose"
+Write-Step "Checking Docker Compose"
 $ComposeCommand = Get-ComposeCommand
 
-Write-Step "Kiem tra artifact model"
+Write-Step "Checking model artifacts"
 $MissingFiles = @()
 foreach ($File in $RequiredFiles) {
     if (-not (Test-Path $File)) {
@@ -46,22 +44,22 @@ foreach ($File in $RequiredFiles) {
 }
 
 if ($MissingFiles.Count -gt 0) {
-    Write-Host "Thieu file trong ai-service/models:" -ForegroundColor Red
+    Write-Host "Missing required files in ai-service/models:" -ForegroundColor Red
     $MissingFiles | ForEach-Object { Write-Host " - $_" -ForegroundColor Red }
-    throw "Dung lai vi artifact model chua day du."
+    throw "Model artifacts are incomplete."
 }
 
-Write-Step "Build image ai-service"
+Write-Step "Building Docker images"
 if ($ComposeCommand.Count -eq 2) {
     & $ComposeCommand[0] $ComposeCommand[1] -f $ComposeFile build
 } else {
     & $ComposeCommand[0] -f $ComposeFile build
 }
 if ($LASTEXITCODE -ne 0) {
-    throw "Build Docker image that bai."
+    throw "Docker image build failed."
 }
 
-Write-Step "Khoi chay stack Docker"
+Write-Step "Starting Docker stack"
 if ($ComposeCommand.Count -eq 2) {
     & $ComposeCommand[0] $ComposeCommand[1] -f $ComposeFile up
 } else {

@@ -26,17 +26,35 @@ springdoc:
     path: /swagger-ui.html
 
 assistant:
-  base-url: ${ASSISTANT_OLLAMA_BASE_URL:http://host.docker.internal:11434}
-  model: ${ASSISTANT_OLLAMA_MODEL:qwen3:4b-instruct}
+  provider-url: ${AI_PROVIDER_URL:https://api.openai.com/v1}
+  api-key: ${AI_PROVIDER_API_KEY:}
+  model: ${AI_PROVIDER_MODEL:}
+  connect-timeout-ms: ${AI_PROVIDER_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${AI_PROVIDER_READ_TIMEOUT_MS:60000}
   history-limit: ${ASSISTANT_HISTORY_LIMIT:10}
   assistant-id: ${ASSISTANT_ID:h-smart-assistant}
   system-prompt: ${ASSISTANT_SYSTEM_PROMPT:You are H-Smart Assistant, a friendly and witty expert in second-hand household appliances. You help users at Ho Chi Minh City University of Technology (HCMUT) marketplace. Always answer in Vietnamese unless requested otherwise.}
+  intent-classifier:
+    connect-timeout-ms: ${ASSISTANT_INTENT_CLASSIFIER_CONNECT_TIMEOUT_MS:1000}
+    read-timeout-ms: ${ASSISTANT_INTENT_CLASSIFIER_READ_TIMEOUT_MS:5000}
 
 product-service:
   base-url: ${PRODUCT_SERVICE_BASE_URL:http://product-service}
   page-size: ${PRODUCT_SERVICE_PAGE_SIZE:30}
   connect-timeout-ms: ${PRODUCT_SERVICE_CONNECT_TIMEOUT_MS:2000}
   read-timeout-ms: ${PRODUCT_SERVICE_READ_TIMEOUT_MS:3000}
+
+order-service:
+  base-url: ${ORDER_SERVICE_BASE_URL:http://order-service}
+  connect-timeout-ms: ${ORDER_SERVICE_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${ORDER_SERVICE_READ_TIMEOUT_MS:3000}
+
+policy-search:
+  base-url: ${POLICY_SEARCH_BASE_URL:http://h-smart-elasticsearch:9200}
+  index-name: ${POLICY_SEARCH_INDEX_NAME:hsmart-policy-index}
+  page-size: ${POLICY_SEARCH_PAGE_SIZE:2}
+  connect-timeout-ms: ${POLICY_SEARCH_CONNECT_TIMEOUT_MS:1000}
+  read-timeout-ms: ${POLICY_SEARCH_READ_TIMEOUT_MS:3000}
 
 internal:
   security:
@@ -52,6 +70,16 @@ resilience4j:
         minimum-number-of-calls: 5
         failure-rate-threshold: 50
         slow-call-duration-threshold: 10s
+        slow-call-rate-threshold: 50
+        wait-duration-in-open-state: 30s
+        permitted-number-of-calls-in-half-open-state: 3
+        automatic-transition-from-open-to-half-open-enabled: true
+      intentClassifierCircuitBreaker:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 10
+        minimum-number-of-calls: 5
+        failure-rate-threshold: 50
+        slow-call-duration-threshold: 3s
         slow-call-rate-threshold: 50
         wait-duration-in-open-state: 30s
         permitted-number-of-calls-in-half-open-state: 3

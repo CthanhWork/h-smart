@@ -45,6 +45,7 @@ ai-service/tests/output/
 agent.md
 project-log.md
 **/SERVICE-NOTES.md
+**/*-notes.md
 docs/
 *E2E*GUIDE*.md
 **/*E2E*GUIDE*.md
