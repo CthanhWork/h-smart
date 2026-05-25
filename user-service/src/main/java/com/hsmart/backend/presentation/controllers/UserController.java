@@ -1,6 +1,7 @@
 package com.hsmart.backend.presentation.controllers;
 
 import com.hsmart.backend.application.dto.ApiResponse;
+import com.hsmart.backend.application.dto.SellerTrustResponseDTO;
 import com.hsmart.backend.application.dto.UpdateProfileRequestDTO;
 import com.hsmart.backend.application.dto.UserProfileResponseDTO;
 import com.hsmart.backend.application.dto.UserStatsResponseDTO;
@@ -14,6 +15,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -56,5 +58,11 @@ public class UserController {
     public ResponseEntity<ApiResponse<UserStatsResponseDTO>> getInternalStats() {
         UserStatsResponseDTO response = userService.getUserStats();
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "User stats fetched successfully", response));
+    }
+
+    @GetMapping("/internal/{sellerId}/trust")
+    public ResponseEntity<ApiResponse<SellerTrustResponseDTO>> getInternalSellerTrust(@PathVariable String sellerId) {
+        SellerTrustResponseDTO response = userService.getSellerTrustProfile(sellerId);
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Seller trust profile fetched successfully", response));
     }
 }

@@ -82,6 +82,13 @@ public class ProductNamingSupport {
                 .orElse("Unknown product");
     }
 
+    public String resolveSuggestedName(String label) {
+        if (!StringUtils.hasText(label)) {
+            return "Unknown product";
+        }
+        return humanizeLabel(label);
+    }
+
     private String humanizeLabel(String label) {
         String normalizedKey = label.toLowerCase(Locale.ROOT).trim();
         String translated = LABEL_TRANSLATIONS.get(normalizedKey);

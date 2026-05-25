@@ -1,6 +1,7 @@
 package com.hsmart.backend.infrastructure.exception;
 
 import com.hsmart.backend.application.dto.ApiResponse;
+import com.hsmart.backend.application.exceptions.AiServiceTimeoutException;
 import com.hsmart.backend.application.exceptions.AiServiceUnavailableException;
 import com.hsmart.backend.application.exceptions.CategoryNotFoundException;
 import com.hsmart.backend.application.exceptions.DuplicateCategoryException;
@@ -23,6 +24,12 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleAiServiceUnavailable(AiServiceUnavailableException exception) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage()));
+    }
+
+    @ExceptionHandler(AiServiceTimeoutException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAiServiceTimeout(AiServiceTimeoutException exception) {
+        return ResponseEntity.status(HttpStatus.GATEWAY_TIMEOUT)
+                .body(ApiResponse.error(HttpStatus.GATEWAY_TIMEOUT, exception.getMessage()));
     }
 
     @ExceptionHandler(FileProcessingException.class)

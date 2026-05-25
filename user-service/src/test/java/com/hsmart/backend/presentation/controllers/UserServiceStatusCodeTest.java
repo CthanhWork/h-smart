@@ -14,6 +14,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hsmart.backend.application.dto.AuthResponseDTO;
 import com.hsmart.backend.application.dto.LoginRequestDTO;
 import com.hsmart.backend.application.dto.RegisterRequestDTO;
+import com.hsmart.backend.application.dto.SellerTrustResponseDTO;
 import com.hsmart.backend.application.dto.UpdateProfileRequestDTO;
 import com.hsmart.backend.application.dto.UserProfileResponseDTO;
 import com.hsmart.backend.domain.entities.Role;
@@ -22,6 +23,7 @@ import com.hsmart.backend.infrastructure.exception.InvalidCredentialsException;
 import com.hsmart.backend.infrastructure.exception.ResourceNotFoundException;
 import com.hsmart.backend.service.AuthService;
 import com.hsmart.backend.service.UserService;
+import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
@@ -217,6 +219,23 @@ class UserServiceStatusCodeTest {
                 .andExpect(jsonPath("$.status").value(200))
                 .andExpect(jsonPath("$.message").value("Profile updated successfully"))
                 .andExpect(jsonPath("$.data.fullName").value("Nguyen Van A Updated"));
+    }
+
+    @Test
+    void getInternalSellerTrustShouldReturn200WhenSellerExists() throws Exception {
+        given(userService.getSellerTrustProfile("seller-one")).willReturn(SellerTrustResponseDTO.builder()
+                .sellerId("seller-one")
+                .trustScore(BigDecimal.valueOf(4.7))
+                .reviewCount(8L)
+                .build());
+
+        mockMvc.perform(get("/api/v1/users/internal/seller-one/trust"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value(200))
+                .andExpect(jsonPath("$.message").value("Seller trust profile fetched successfully"))
+                .andExpect(jsonPath("$.data.sellerId").value("seller-one"))
+                .andExpect(jsonPath("$.data.trustScore").value(4.7))
+                .andExpect(jsonPath("$.data.reviewCount").value(8));
     }
 
     private AuthResponseDTO buildAuthResponse() {

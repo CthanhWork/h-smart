@@ -6,6 +6,10 @@ import com.hsmart.backend.application.dto.AssistantProductContext;
 import com.hsmart.backend.application.dto.IntentClassification;
 import com.hsmart.backend.application.dto.IntentClassification.Intent;
 import com.hsmart.backend.application.dto.OrderSummary;
+import com.hsmart.backend.application.dto.ProductDescriptionRequest;
+import com.hsmart.backend.application.dto.ProductDescriptionResponse;
+import com.hsmart.backend.application.exceptions.AssistantGatewayTimeoutException;
+import com.hsmart.backend.application.exceptions.AssistantServiceUnavailableException;
 import com.hsmart.backend.application.exceptions.InvalidInteractionRequestException;
 import com.hsmart.backend.domain.entities.ChatMessage;
 import com.hsmart.backend.infrastructure.config.AssistantProperties;
@@ -40,6 +44,10 @@ public class AssistantServiceImpl implements AssistantService {
     private static final String USER_ROLE = "user";
     private static final String ASSISTANT_ROLE = "assistant";
     private static final Locale VIETNAM_LOCALE = Locale.forLanguageTag("vi-VN");
+    private static final String PRODUCT_DESCRIPTION_SYSTEM_PROMPT = "You are an expert copywriter for H-Smart, "
+            + "a C2C marketplace for second-hand household appliances in Vietnam. Your task is to write a catchy, "
+            + "honest, and SEO-friendly product description in Vietnamese based on the provided details. Keep it "
+            + "under 150 words. Format with bullet points for readability. Do not include fake contact info.";
 
     private final ChatMessageRepository chatMessageRepository;
     private final AssistantModelClient assistantModelClient;
@@ -101,6 +109,27 @@ public class AssistantServiceImpl implements AssistantService {
         log.info("Completed assistant chat request for user {} with traceId {} in {} ms. AI response time was {} ms",
                 normalizedUserId, traceId, elapsedMillis(startedAt), aiDurationMs);
         return assistantReply;
+    }
+
+    @Override
+    public ProductDescriptionResponse generateProductDescription(ProductDescriptionRequest request) {
+        validateProductDescriptionRequest(request);
+
+        List<AssistantChatMessage> messages = List.of(
+                new AssistantChatMessage(SYSTEM_ROLE, PRODUCT_DESCRIPTION_SYSTEM_PROMPT),
+                new AssistantChatMessage(USER_ROLE, buildProductDescriptionUserPrompt(request))
+        );
+        String traceId = currentTraceId();
+
+        try {
+            String generatedDescription = assistantModelClient.generateReply(messages);
+            log.info("Generated product description with traceId {}", traceId);
+            return new ProductDescriptionResponse(generatedDescription);
+        } catch (AssistantServiceUnavailableException | AssistantGatewayTimeoutException exception) {
+            log.warn("Product description generation failed with traceId {}. Returning an empty description. Reason: {}",
+                    traceId, exception.getClass().getSimpleName());
+            return new ProductDescriptionResponse("");
+        }
     }
 
     private List<AssistantChatMessage> buildPromptMessages(
@@ -231,6 +260,32 @@ public class AssistantServiceImpl implements AssistantService {
         }
 
         return assistantProperties.systemPrompt() + "\n\n" + promptContext.promptAddition();
+    }
+
+    private String buildProductDescriptionUserPrompt(ProductDescriptionRequest request) {
+        return "Write a product listing description from these provided details:\n"
+                + "- Product name: " + request.getProductName().trim() + "\n"
+                + "- Category: " + request.getCategory().trim() + "\n"
+                + "- Condition: " + request.getCondition().trim() + "\n"
+                + "- Price: " + request.getPrice().stripTrailingZeros().toPlainString() + " VND";
+    }
+
+    private void validateProductDescriptionRequest(ProductDescriptionRequest request) {
+        if (request == null) {
+            throw new InvalidInteractionRequestException("product description request is required");
+        }
+        if (!StringUtils.hasText(request.getProductName())) {
+            throw new InvalidInteractionRequestException("productName is required");
+        }
+        if (!StringUtils.hasText(request.getCategory())) {
+            throw new InvalidInteractionRequestException("category is required");
+        }
+        if (!StringUtils.hasText(request.getCondition())) {
+            throw new InvalidInteractionRequestException("condition is required");
+        }
+        if (request.getPrice() == null || request.getPrice().signum() < 0) {
+            throw new InvalidInteractionRequestException("price must be zero or greater");
+        }
     }
 
     private String applyRealtimeUnavailableNotice(String assistantReply, AssistantPromptContext promptContext) {

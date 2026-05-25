@@ -31,6 +31,10 @@ spring:
           max-attempts: 3
           max-interval: 5s
           multiplier: 2
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
 server:
   port: ${SERVER_PORT:8082}
 app:
@@ -38,6 +42,10 @@ app:
 services:
   ai:
     base-url: ${AI_SERVICE_BASE_URL:http://localhost:8002}
+    connect-timeout-ms: ${AI_SERVICE_CONNECT_TIMEOUT_MS:2000}
+    read-timeout-ms: ${AI_SERVICE_READ_TIMEOUT_MS:5000}
+pricing:
+  average-refresh-cron: ${PRICING_AVERAGE_REFRESH_CRON:0 0 * * * *}
 storage:
   upload-dir: ${STORAGE_UPLOAD_DIR:uploads}
 internal:

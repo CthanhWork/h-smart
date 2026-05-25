@@ -2,11 +2,13 @@ package com.hsmart.backend.service.impl;
 
 import com.hsmart.backend.application.dto.DetectionDTO;
 import com.hsmart.backend.application.dto.PredictResponseDTO;
+import com.hsmart.backend.application.exceptions.AiServiceTimeoutException;
 import com.hsmart.backend.application.exceptions.AiServiceUnavailableException;
 import com.hsmart.backend.application.exceptions.FileProcessingException;
 import com.hsmart.backend.infrastructure.config.AiServiceProperties;
 import com.hsmart.backend.service.VisionService;
 import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.util.ArrayList;
 import lombok.RequiredArgsConstructor;
 import org.springframework.core.io.ByteArrayResource;
@@ -76,11 +78,25 @@ public class VisionServiceImpl implements VisionService {
 
             return response;
         } catch (ResourceAccessException exception) {
-            throw new AiServiceUnavailableException("AI service did not respond", exception);
+            if (isTimeout(exception)) {
+                throw new AiServiceTimeoutException("AI service timed out", exception);
+            }
+            throw new AiServiceUnavailableException("AI service is unavailable", exception);
         } catch (RestClientException exception) {
             throw new AiServiceUnavailableException("Failed to call AI service", exception);
         } catch (IOException exception) {
             throw new FileProcessingException("Unable to read uploaded image", exception);
         }
+    }
+
+    private boolean isTimeout(Throwable exception) {
+        Throwable current = exception;
+        while (current != null) {
+            if (current instanceof SocketTimeoutException) {
+                return true;
+            }
+            current = current.getCause();
+        }
+        return false;
     }
 }

@@ -15,6 +15,13 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 @JsonIgnoreProperties(ignoreUnknown = true)
 public class PredictResponseDTO {
+    private String label;
+
+    private Double confidence;
+
+    @JsonProperty("translated_label")
+    private String translatedLabel;
+
     @JsonProperty("num_detections")
     private Integer numDetections;
 

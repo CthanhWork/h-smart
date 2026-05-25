@@ -1,12 +1,14 @@
 package com.hsmart.backend.presentation.controllers;
 
 import com.hsmart.backend.application.dto.ApiResponse;
+import com.hsmart.backend.application.dto.ImageAnalysisResponseDTO;
 import com.hsmart.backend.application.dto.PageResponseDTO;
 import com.hsmart.backend.application.dto.ProductModerationStatusRequest;
 import com.hsmart.backend.application.dto.ProductRequestDTO;
 import com.hsmart.backend.application.dto.ProductResponseDTO;
 import com.hsmart.backend.application.dto.ProductStatsResponseDTO;
 import com.hsmart.backend.domain.entities.ProductStatus;
+import com.hsmart.backend.service.ProductImageAnalysisService;
 import com.hsmart.backend.service.ProductService;
 import jakarta.validation.Valid;
 import java.io.IOException;
@@ -38,6 +40,7 @@ import org.springframework.web.server.ResponseStatusException;
 public class ProductController {
 
     private final ProductService productService;
+    private final ProductImageAnalysisService productImageAnalysisService;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<ProductResponseDTO>> createProduct(
@@ -51,6 +54,18 @@ public class ProductController {
         ProductResponseDTO response = productService.createProduct(request, file);
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(HttpStatus.CREATED, "Product created successfully", response));
+    }
+
+    @PostMapping(value = "/analyze-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<ImageAnalysisResponseDTO>> analyzeImage(
+            @RequestPart("file") MultipartFile file
+    ) {
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Image file is required");
+        }
+
+        ImageAnalysisResponseDTO response = productImageAnalysisService.analyzeImage(file);
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Product image analyzed successfully", response));
     }
 
     @PutMapping("/{id}")

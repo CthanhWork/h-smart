@@ -13,6 +13,10 @@ import com.hsmart.backend.application.dto.AssistantProductContext;
 import com.hsmart.backend.application.dto.IntentClassification;
 import com.hsmart.backend.application.dto.IntentClassification.Intent;
 import com.hsmart.backend.application.dto.OrderSummary;
+import com.hsmart.backend.application.dto.ProductDescriptionRequest;
+import com.hsmart.backend.application.dto.ProductDescriptionResponse;
+import com.hsmart.backend.application.exceptions.AssistantGatewayTimeoutException;
+import com.hsmart.backend.application.exceptions.AssistantServiceUnavailableException;
 import com.hsmart.backend.domain.entities.ChatMessage;
 import com.hsmart.backend.infrastructure.config.AssistantProperties;
 import com.hsmart.backend.infrastructure.persistence.ChatMessageRepository;
@@ -259,6 +263,69 @@ class AssistantServiceImplTest {
         assertEquals(true, systemPrompt.contains("does not match the listing"));
         verifyNoInteractions(productContextService);
         verifyNoInteractions(orderClient);
+    }
+
+    @Test
+    void generateProductDescriptionShouldUseDedicatedPromptAndReturnGeneratedText() {
+        AssistantServiceImpl assistantService = newAssistantService();
+        ProductDescriptionRequest request = ProductDescriptionRequest.builder()
+                .productName("Leather sofa")
+                .category("Living room furniture")
+                .condition("Used, minor scratch")
+                .price(BigDecimal.valueOf(1500000))
+                .build();
+        when(assistantModelClient.generateReply(any())).thenReturn("- Sofa da that con dep\n- Gia hop ly");
+
+        ProductDescriptionResponse response = assistantService.generateProductDescription(request);
+
+        assertEquals("- Sofa da that con dep\n- Gia hop ly", response.generatedDescription());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<AssistantChatMessage>> promptCaptor = ArgumentCaptor.forClass(List.class);
+        verify(assistantModelClient).generateReply(promptCaptor.capture());
+        List<AssistantChatMessage> prompt = promptCaptor.getValue();
+        assertEquals(2, prompt.size());
+        assertEquals("system", prompt.get(0).role());
+        assertEquals(true, prompt.get(0).content().contains("expert copywriter for H-Smart"));
+        assertEquals(true, prompt.get(0).content().contains("under 150 words"));
+        assertEquals("user", prompt.get(1).role());
+        assertEquals(true, prompt.get(1).content().contains("Product name: Leather sofa"));
+        assertEquals(true, prompt.get(1).content().contains("Category: Living room furniture"));
+        assertEquals(true, prompt.get(1).content().contains("Condition: Used, minor scratch"));
+        assertEquals(true, prompt.get(1).content().contains("Price: 1500000 VND"));
+        verifyNoInteractions(chatMessageRepository, intentClassifier, orderClient, policySearchService, productContextService);
+    }
+
+    @Test
+    void generateProductDescriptionShouldReturnEmptyDescriptionWhenProviderIsUnavailable() {
+        AssistantServiceImpl assistantService = newAssistantService();
+        ProductDescriptionRequest request = validProductDescriptionRequest();
+        when(assistantModelClient.generateReply(any()))
+                .thenThrow(new AssistantServiceUnavailableException("Assistant service is unavailable"));
+
+        ProductDescriptionResponse response = assistantService.generateProductDescription(request);
+
+        assertEquals("", response.generatedDescription());
+    }
+
+    @Test
+    void generateProductDescriptionShouldReturnEmptyDescriptionWhenProviderTimesOut() {
+        AssistantServiceImpl assistantService = newAssistantService();
+        ProductDescriptionRequest request = validProductDescriptionRequest();
+        when(assistantModelClient.generateReply(any()))
+                .thenThrow(new AssistantGatewayTimeoutException("Assistant service timed out", new RuntimeException()));
+
+        ProductDescriptionResponse response = assistantService.generateProductDescription(request);
+
+        assertEquals("", response.generatedDescription());
+    }
+
+    private ProductDescriptionRequest validProductDescriptionRequest() {
+        return ProductDescriptionRequest.builder()
+                .productName("Sofa")
+                .category("Furniture")
+                .condition("Used")
+                .price(BigDecimal.valueOf(1500000))
+                .build();
     }
 
     private AssistantServiceImpl newAssistantService() {
