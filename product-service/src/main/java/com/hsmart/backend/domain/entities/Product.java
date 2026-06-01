@@ -66,6 +66,10 @@ public class Product {
     @Column(name = "is_deleted", nullable = false)
     private boolean isDeleted = false;
 
+    @Builder.Default
+    @Column(name = "like_count", nullable = false, columnDefinition = "bigint default 0")
+    private long likeCount = 0;
+
     @UpdateTimestamp
     @Column(name = "updated_at")
     private LocalDateTime updatedAt;

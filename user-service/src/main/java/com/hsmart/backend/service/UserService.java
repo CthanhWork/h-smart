@@ -2,6 +2,7 @@ package com.hsmart.backend.service;
 
 import com.hsmart.backend.application.dto.UpdateProfileRequestDTO;
 import com.hsmart.backend.application.dto.SellerTrustResponseDTO;
+import com.hsmart.backend.application.dto.UserAddressResponseDTO;
 import com.hsmart.backend.application.dto.UserProfileResponseDTO;
 import com.hsmart.backend.application.dto.UserStatsResponseDTO;
 
@@ -10,4 +11,6 @@ public interface UserService {
     UserProfileResponseDTO updateProfile(String username, UpdateProfileRequestDTO request);
     UserStatsResponseDTO getUserStats();
     SellerTrustResponseDTO getSellerTrustProfile(String sellerId);
+    UserAddressResponseDTO getUserAddress(String userId);
+    void updateUserActiveStatus(String userId, boolean active);
 }

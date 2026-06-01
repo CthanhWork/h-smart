@@ -23,6 +23,7 @@ public class ProductResponseDTO {
     private Long categoryId;
     private String categoryName;
     private String imageUrl;
+    private long likeCount;
 
     @Builder.Default
     private List<DetectionDTO> aiMetadata = new ArrayList<>();

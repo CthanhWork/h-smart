@@ -97,6 +97,22 @@ public class ProductController {
         );
     }
 
+    @PostMapping("/{id}/like")
+    public ResponseEntity<ApiResponse<Void>> toggleProductLike(@PathVariable Long id) {
+        String message = productService.toggleProductLike(id);
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, message, null));
+    }
+
+    @GetMapping("/wishlist")
+    public ResponseEntity<ApiResponse<PageResponseDTO<ProductResponseDTO>>> getWishlist(
+            @ParameterObject
+            @PageableDefault(sort = "createdAt", direction = Sort.Direction.DESC) Pageable pageable
+    ) {
+        return ResponseEntity.ok(
+                ApiResponse.success(HttpStatus.OK, "Wishlist fetched successfully", productService.getWishlist(pageable))
+        );
+    }
+
     @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<ProductResponseDTO>> getProductById(@PathVariable Long id) {
         return ResponseEntity.ok(

@@ -2,6 +2,7 @@ package com.hsmart.backend.service.impl;
 
 import com.hsmart.backend.application.dto.SellerTrustResponseDTO;
 import com.hsmart.backend.application.dto.UpdateProfileRequestDTO;
+import com.hsmart.backend.application.dto.UserAddressResponseDTO;
 import com.hsmart.backend.application.dto.UserProfileResponseDTO;
 import com.hsmart.backend.application.dto.UserStatsResponseDTO;
 import com.hsmart.backend.application.mapper.UserMapper;
@@ -61,5 +62,38 @@ public class UserServiceImpl implements UserService {
                 .trustScore(seller.getTrustScore())
                 .reviewCount(seller.getReviewCount())
                 .build();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public UserAddressResponseDTO getUserAddress(String userId) {
+        if (!StringUtils.hasText(userId)) {
+            throw new ResourceNotFoundException("User not found");
+        }
+
+        User user = userRepository.findByUsername(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        return UserAddressResponseDTO.builder()
+                .userId(user.getUsername())
+                .fullName(user.getFullName())
+                .phoneNumber(user.getPhoneNumber())
+                .province(user.getProvince())
+                .district(user.getDistrict())
+                .ward(user.getWard())
+                .streetDetail(user.getStreetDetail())
+                .build();
+    }
+
+    @Override
+    public void updateUserActiveStatus(String userId, boolean active) {
+        if (!StringUtils.hasText(userId)) {
+            throw new ResourceNotFoundException("User not found");
+        }
+
+        User user = userRepository.findByUsername(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        user.setActive(active);
+        userRepository.save(user);
     }
 }

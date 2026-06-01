@@ -46,8 +46,17 @@ public class User {
     @Column(length = 30)
     private String phoneNumber;
 
-    @Column(columnDefinition = "text")
-    private String address;
+    @Column(length = 100)
+    private String province;
+
+    @Column(length = 100)
+    private String district;
+
+    @Column(length = 100)
+    private String ward;
+
+    @Column(name = "street_detail", columnDefinition = "text")
+    private String streetDetail;
 
     @Column(columnDefinition = "text")
     private String avatarUrl;
@@ -59,6 +68,10 @@ public class User {
     @Builder.Default
     @Column(name = "review_count")
     private Long reviewCount = 0L;
+
+    @Builder.Default
+    @Column(name = "is_active", nullable = false, columnDefinition = "boolean default true")
+    private boolean active = true;
 
     @PrePersist
     public void applyDefaults() {

@@ -19,12 +19,14 @@ import com.hsmart.backend.application.mapper.ProductMapper;
 import com.hsmart.backend.application.mapper.ProductNamingSupport;
 import com.hsmart.backend.domain.entities.Category;
 import com.hsmart.backend.domain.entities.Product;
+import com.hsmart.backend.domain.entities.ProductLike;
 import com.hsmart.backend.domain.entities.ProductStatus;
 import com.hsmart.backend.infrastructure.config.ApplicationProperties;
 import com.hsmart.backend.infrastructure.config.StorageProperties;
 import com.hsmart.backend.infrastructure.context.UserContextHolder;
 import com.hsmart.backend.infrastructure.messaging.ProductEventPublisher;
 import com.hsmart.backend.infrastructure.persistence.CategoryRepository;
+import com.hsmart.backend.infrastructure.persistence.ProductLikeRepository;
 import com.hsmart.backend.infrastructure.persistence.ProductRepository;
 import com.hsmart.backend.service.ProductService;
 import com.hsmart.backend.service.VisionService;
@@ -59,6 +61,7 @@ public class ProductServiceImpl implements ProductService {
 
     private final VisionService visionService;
     private final ProductRepository productRepository;
+    private final ProductLikeRepository productLikeRepository;
     private final CategoryRepository categoryRepository;
     private final ObjectMapper objectMapper;
     private final StorageProperties storageProperties;
@@ -146,9 +149,28 @@ public class ProductServiceImpl implements ProductService {
 
     @Override
     @Transactional(readOnly = true)
+    public PageResponseDTO<ProductResponseDTO> getWishlist(Pageable pageable) {
+        String userId = getCurrentUserId();
+        Page<ProductResponseDTO> page = productLikeRepository
+                .findAllByUserIdAndProductIsDeletedFalseAndProductStatusNot(userId, ProductStatus.SOLD, pageable)
+                .map(productLike -> toProductResponse(productLike.getProduct()));
+        return PageResponseDTO.from(page);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public ProductResponseDTO getProductById(Long id) {
         Product product = getActiveProduct(id);
         return toProductResponse(product);
+    }
+
+    @Override
+    public String toggleProductLike(Long id) {
+        String userId = getCurrentUserId();
+        Product product = getActiveProduct(id);
+        return productLikeRepository.findByUserIdAndProductId(userId, product.getId())
+                .map(productLike -> removeProductLike(productLike, product))
+                .orElseGet(() -> saveProductLike(userId, product));
     }
 
     @Override
@@ -198,6 +220,23 @@ public class ProductServiceImpl implements ProductService {
     private String getCurrentUserId() {
         return UserContextHolder.getCurrentUserId()
                 .orElseThrow(MissingUserContextException::new);
+    }
+
+    private String saveProductLike(String userId, Product product) {
+        productLikeRepository.save(ProductLike.builder()
+                .userId(userId)
+                .product(product)
+                .build());
+        productRepository.incrementLikeCount(product.getId());
+        log.info("Saved product {} to wishlist for user {}", product.getId(), userId);
+        return "Product saved to wishlist";
+    }
+
+    private String removeProductLike(ProductLike productLike, Product product) {
+        productLikeRepository.delete(productLike);
+        productRepository.decrementLikeCount(product.getId());
+        log.info("Removed product {} from wishlist for user {}", product.getId(), productLike.getUserId());
+        return "Product removed from wishlist";
     }
 
     private String normalizeKeyword(String keyword) {

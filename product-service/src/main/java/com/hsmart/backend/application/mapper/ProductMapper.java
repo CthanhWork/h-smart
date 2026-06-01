@@ -22,6 +22,7 @@ public interface ProductMapper {
     @Mapping(target = "category", source = "category")
     @Mapping(target = "imageUrl", source = "relativeImageUrl")
     @Mapping(target = "aiMetadata", source = "aiMetadataJson")
+    @Mapping(target = "likeCount", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     Product toEntity(
             String description,

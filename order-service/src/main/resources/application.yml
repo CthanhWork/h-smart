@@ -31,6 +31,20 @@ product-service:
   connect-timeout-ms: ${PRODUCT_SERVICE_CONNECT_TIMEOUT_MS:2000}
   read-timeout-ms: ${PRODUCT_SERVICE_READ_TIMEOUT_MS:3000}
 
+user-service:
+  base-url: ${USER_SERVICE_BASE_URL:http://user-service}
+  connect-timeout-ms: ${USER_SERVICE_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${USER_SERVICE_READ_TIMEOUT_MS:3000}
+
+ghtk:
+  api-url: ${GHTK_API_URL:https://services.giaohangtietkiem.vn}
+  api-token: ${GHTK_API_TOKEN:}
+  connect-timeout-ms: ${GHTK_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${GHTK_READ_TIMEOUT_MS:5000}
+  default-weight-grams: ${GHTK_DEFAULT_WEIGHT_GRAMS:1000}
+  client-source: ${GHTK_CLIENT_SOURCE:}
+  webhook-hash: ${GHTK_WEBHOOK_HASH:}
+
 internal:
   security:
     enabled: ${INTERNAL_SECURITY_ENABLED:true}

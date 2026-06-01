@@ -443,6 +443,16 @@ services:
       PRODUCT_SERVICE_BASE_URL: http://product-service
       PRODUCT_SERVICE_CONNECT_TIMEOUT_MS: "2000"
       PRODUCT_SERVICE_READ_TIMEOUT_MS: "3000"
+      USER_SERVICE_BASE_URL: http://user-service
+      USER_SERVICE_CONNECT_TIMEOUT_MS: "2000"
+      USER_SERVICE_READ_TIMEOUT_MS: "3000"
+      GHTK_API_URL: ${GHTK_API_URL:-https://services.giaohangtietkiem.vn}
+      GHTK_API_TOKEN: ${GHTK_API_TOKEN:-}
+      GHTK_CONNECT_TIMEOUT_MS: "2000"
+      GHTK_READ_TIMEOUT_MS: "5000"
+      GHTK_DEFAULT_WEIGHT_GRAMS: "1000"
+      GHTK_CLIENT_SOURCE: ${GHTK_CLIENT_SOURCE:-}
+      GHTK_WEBHOOK_HASH: ${GHTK_WEBHOOK_HASH:-}
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
       LOGSTASH_HOST: logstash
@@ -455,6 +465,8 @@ services:
       order-postgres-db:
         condition: service_healthy
       product-service:
+        condition: service_healthy
+      user-service:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy

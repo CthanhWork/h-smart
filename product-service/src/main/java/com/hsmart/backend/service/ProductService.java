@@ -14,7 +14,9 @@ public interface ProductService {
     ProductResponseDTO updateProduct(Long id, ProductRequestDTO request);
     void deleteProduct(Long id);
     PageResponseDTO<ProductResponseDTO> getAllProducts(String keyword, ProductStatus status, Long categoryId, Pageable pageable);
+    PageResponseDTO<ProductResponseDTO> getWishlist(Pageable pageable);
     ProductResponseDTO getProductById(Long id);
+    String toggleProductLike(Long id);
     void markProductSoldFromOrderEvent(Long productId);
     ProductResponseDTO updateModerationStatus(Long id, ProductStatus status);
     ProductStatsResponseDTO getProductStats();

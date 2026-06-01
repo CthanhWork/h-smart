@@ -3,6 +3,9 @@ package com.hsmart.backend.presentation.controllers;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.BDDMockito.given;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -16,13 +19,19 @@ import com.hsmart.backend.application.dto.LoginRequestDTO;
 import com.hsmart.backend.application.dto.RegisterRequestDTO;
 import com.hsmart.backend.application.dto.SellerTrustResponseDTO;
 import com.hsmart.backend.application.dto.UpdateProfileRequestDTO;
+import com.hsmart.backend.application.dto.UserAddressResponseDTO;
 import com.hsmart.backend.application.dto.UserProfileResponseDTO;
 import com.hsmart.backend.domain.entities.Role;
+import com.hsmart.backend.domain.entities.User;
+import com.hsmart.backend.infrastructure.config.JwtService;
+import com.hsmart.backend.infrastructure.exception.AccountBannedException;
 import com.hsmart.backend.infrastructure.exception.DuplicateResourceException;
 import com.hsmart.backend.infrastructure.exception.InvalidCredentialsException;
 import com.hsmart.backend.infrastructure.exception.ResourceNotFoundException;
+import com.hsmart.backend.infrastructure.persistence.UserRepository;
 import com.hsmart.backend.service.AuthService;
 import com.hsmart.backend.service.UserService;
+import com.hsmart.backend.service.impl.AuthServiceImpl;
 import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -30,6 +39,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.mock.mockito.MockBean;
 import org.springframework.http.MediaType;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 
@@ -141,6 +151,51 @@ class UserServiceStatusCodeTest {
     }
 
     @Test
+    void loginShouldReturn403WhenAccountIsBanned() throws Exception {
+        LoginRequestDTO request = LoginRequestDTO.builder()
+                .usernameOrEmail("nguyenvana")
+                .password("123456")
+                .build();
+
+        given(authService.login(any(LoginRequestDTO.class)))
+                .willThrow(new AccountBannedException());
+
+        mockMvc.perform(post("/api/v1/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.status").value(403))
+                .andExpect(jsonPath("$.message").value("Account has been banned"));
+    }
+
+    @Test
+    void authServiceShouldRejectBannedAccountBeforeGeneratingToken() {
+        UserRepository userRepository = mock(UserRepository.class);
+        PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
+        JwtService jwtService = mock(JwtService.class);
+        com.hsmart.backend.application.mapper.UserMapper userMapper =
+                mock(com.hsmart.backend.application.mapper.UserMapper.class);
+        AuthServiceImpl service = new AuthServiceImpl(userRepository, passwordEncoder, jwtService, userMapper);
+        User bannedUser = User.builder()
+                .username("nguyenvana")
+                .email("vana@example.com")
+                .password("encoded-password")
+                .active(false)
+                .build();
+        when(userRepository.findByUsernameOrEmail("nguyenvana", "nguyenvana"))
+                .thenReturn(java.util.Optional.of(bannedUser));
+
+        org.junit.jupiter.api.Assertions.assertThrows(
+                AccountBannedException.class,
+                () -> service.login(LoginRequestDTO.builder()
+                        .usernameOrEmail("nguyenvana")
+                        .password("123456")
+                        .build())
+        );
+        verifyNoInteractions(passwordEncoder, jwtService, userMapper);
+    }
+
+    @Test
     void loginShouldReturn400WhenJsonIsMalformed() throws Exception {
         mockMvc.perform(post("/api/v1/auth/login")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -202,7 +257,10 @@ class UserServiceStatusCodeTest {
         UpdateProfileRequestDTO request = UpdateProfileRequestDTO.builder()
                 .fullName("Nguyen Van A Updated")
                 .phoneNumber("0901234567")
-                .address("Thu Duc, Ho Chi Minh City")
+                .province("Ho Chi Minh City")
+                .district("Thu Duc City")
+                .ward("Linh Trung Ward")
+                .streetDetail("1 Vo Van Ngan Street")
                 .avatarUrl("https://example.com/avatar.jpg")
                 .build();
 
@@ -238,6 +296,39 @@ class UserServiceStatusCodeTest {
                 .andExpect(jsonPath("$.data.reviewCount").value(8));
     }
 
+    @Test
+    void getInternalUserAddressShouldReturn200WhenUserExists() throws Exception {
+        given(userService.getUserAddress("seller-one")).willReturn(UserAddressResponseDTO.builder()
+                .userId("seller-one")
+                .fullName("Seller One")
+                .phoneNumber("0901234567")
+                .province("Ho Chi Minh City")
+                .district("District 1")
+                .ward("Ben Nghe Ward")
+                .streetDetail("1 Le Loi Street")
+                .build());
+
+        mockMvc.perform(get("/api/v1/users/internal/seller-one/address"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value(200))
+                .andExpect(jsonPath("$.message").value("User address fetched successfully"))
+                .andExpect(jsonPath("$.data.userId").value("seller-one"))
+                .andExpect(jsonPath("$.data.phoneNumber").value("0901234567"))
+                .andExpect(jsonPath("$.data.district").value("District 1"));
+    }
+
+    @Test
+    void updateInternalUserStatusShouldReturn200() throws Exception {
+        mockMvc.perform(put("/api/v1/users/internal/seller-one/status")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"isActive\":false}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value(200))
+                .andExpect(jsonPath("$.message").value("User status updated successfully"));
+
+        org.mockito.Mockito.verify(userService).updateUserActiveStatus("seller-one", false);
+    }
+
     private AuthResponseDTO buildAuthResponse() {
         return AuthResponseDTO.builder()
                 .accessToken("mock-token")
@@ -254,7 +345,10 @@ class UserServiceStatusCodeTest {
                 .role(Role.USER)
                 .fullName("Nguyen Van A")
                 .phoneNumber("0901234567")
-                .address("Thu Duc, Ho Chi Minh City")
+                .province("Ho Chi Minh City")
+                .district("Thu Duc City")
+                .ward("Linh Trung Ward")
+                .streetDetail("1 Vo Van Ngan Street")
                 .avatarUrl("https://example.com/avatar.jpg")
                 .build();
     }

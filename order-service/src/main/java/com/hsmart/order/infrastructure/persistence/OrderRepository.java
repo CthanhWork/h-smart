@@ -13,6 +13,8 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     Optional<Order> findFirstByBuyerIdOrderByCreatedAtDescIdDesc(String buyerId);
 
+    Optional<Order> findByTrackingCode(String trackingCode);
+
     @Query("select coalesce(sum(o.amount), 0) from Order o where o.status = :status")
     BigDecimal sumAmountByStatus(@Param("status") OrderStatus status);
 }

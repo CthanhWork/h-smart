@@ -31,17 +31,20 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
     private static final String ADMIN_REQUIRED_MESSAGE = "Admin role is required";
     private static final String WEBSOCKET_PATH_PREFIX = "/api/v1/interactions/ws";
     private static final String ADMIN_PATH_PREFIX = "/api/v1/admin/";
+    private static final String PRODUCT_CATEGORIES_PATH = "/api/v1/products/categories";
     private static final List<String> PUBLIC_PATHS = List.of(
             "/api/v1/auth/**",
             "/api/v1/products/media/**",
             "/api/v1/search/**",
+            "/api/v1/orders/internal/ghtk-webhook",
             "/health",
             "/v3/api-docs/**",
             "/swagger-ui/**",
             "/swagger-ui.html"
     );
     private static final List<String> PUBLIC_GET_PATHS = List.of(
-            "/api/v1/reviews/**"
+            "/api/v1/reviews/**",
+            PRODUCT_CATEGORIES_PATH
     );
 
     private final JwtService jwtService;
@@ -83,7 +86,7 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
                     return writeUnauthorizedResponse(exchange);
                 }
                 String role = resolveRole(claims);
-                if (path.startsWith(ADMIN_PATH_PREFIX) && !"ADMIN".equalsIgnoreCase(role)) {
+                if (requiresAdminRole(exchange, path) && !"ADMIN".equalsIgnoreCase(role)) {
                     log.warn("Authorization rejected for path {} because the caller role is not ADMIN", path);
                     return writeForbiddenResponse(exchange);
                 }
@@ -126,6 +129,12 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
         }
 
         return null;
+    }
+
+    private boolean requiresAdminRole(ServerWebExchange exchange, String path) {
+        return path.startsWith(ADMIN_PATH_PREFIX)
+                || (HttpMethod.POST.equals(exchange.getRequest().getMethod())
+                && PRODUCT_CATEGORIES_PATH.equals(path));
     }
 
     private Mono<Void> writeUnauthorizedResponse(ServerWebExchange exchange) {

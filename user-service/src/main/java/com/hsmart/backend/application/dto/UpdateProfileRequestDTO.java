@@ -18,8 +18,17 @@ public class UpdateProfileRequestDTO {
     @Schema(example = "0901234567")
     private String phoneNumber;
 
-    @Schema(example = "Go Vap, Ho Chi Minh City")
-    private String address;
+    @Schema(example = "Ho Chi Minh City")
+    private String province;
+
+    @Schema(example = "Go Vap District")
+    private String district;
+
+    @Schema(example = "Ward 1")
+    private String ward;
+
+    @Schema(example = "12 Nguyen Van Nghi Street")
+    private String streetDetail;
 
     @Schema(example = "https://example.com/avatar-new.jpg")
     private String avatarUrl;

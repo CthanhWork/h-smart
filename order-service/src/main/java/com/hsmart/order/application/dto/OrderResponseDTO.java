@@ -18,6 +18,8 @@ public class OrderResponseDTO {
     private String sellerId;
     private Long productId;
     private BigDecimal amount;
+    private BigDecimal shippingFee;
+    private String trackingCode;
     private OrderStatus status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

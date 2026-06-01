@@ -8,6 +8,7 @@ import com.hsmart.backend.domain.entities.Role;
 import com.hsmart.backend.domain.entities.User;
 import com.hsmart.backend.infrastructure.config.JwtService;
 import com.hsmart.backend.infrastructure.exception.DuplicateResourceException;
+import com.hsmart.backend.infrastructure.exception.AccountBannedException;
 import com.hsmart.backend.infrastructure.exception.InvalidCredentialsException;
 import com.hsmart.backend.infrastructure.persistence.UserRepository;
 import com.hsmart.backend.service.AuthService;
@@ -42,7 +43,10 @@ public class AuthServiceImpl implements AuthService {
                 .role(Role.USER)
                 .fullName(request.getFullName())
                 .phoneNumber(request.getPhoneNumber())
-                .address(request.getAddress())
+                .province(request.getProvince())
+                .district(request.getDistrict())
+                .ward(request.getWard())
+                .streetDetail(request.getStreetDetail())
                 .avatarUrl(request.getAvatarUrl())
                 .build());
 
@@ -54,6 +58,10 @@ public class AuthServiceImpl implements AuthService {
     public AuthResponseDTO login(LoginRequestDTO request) {
         User user = userRepository.findByUsernameOrEmail(request.getUsernameOrEmail(), request.getUsernameOrEmail())
                 .orElseThrow(() -> new InvalidCredentialsException("Invalid username/email or password"));
+
+        if (!user.isActive()) {
+            throw new AccountBannedException();
+        }
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new InvalidCredentialsException("Invalid username/email or password");

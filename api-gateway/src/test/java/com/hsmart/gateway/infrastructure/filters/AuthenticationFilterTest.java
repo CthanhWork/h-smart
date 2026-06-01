@@ -68,6 +68,25 @@ class AuthenticationFilterTest {
     }
 
     @Test
+    void shouldBypassAuthenticationForGhtkWebhookPath() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/orders/internal/ghtk-webhook?hash=webhook-secret").build()
+        );
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertTrue(chainCalled.get());
+        verifyNoInteractions(jwtService);
+    }
+
+    @Test
     void shouldBypassAuthenticationForPublicReviewReadPath() {
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/v1/reviews/sellers/seller-1").build()
@@ -90,6 +109,128 @@ class AuthenticationFilterTest {
     void shouldRequireAuthenticationForReviewCreatePath() {
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.post("/api/v1/reviews").build()
+        );
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertFalse(chainCalled.get());
+        assertEquals(401, exchange.getResponse().getStatusCode().value());
+    }
+
+    @Test
+    void shouldRequireAuthenticationForWishlistPath() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/products/wishlist").build()
+        );
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertFalse(chainCalled.get());
+        assertEquals(401, exchange.getResponse().getStatusCode().value());
+    }
+
+    @Test
+    void shouldBypassAuthenticationForCategoryReadPath() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/products/categories").build()
+        );
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertTrue(chainCalled.get());
+        verifyNoInteractions(jwtService);
+    }
+
+    @Test
+    void shouldRequireAuthenticationForCategoryCreatePath() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/products/categories").build()
+        );
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertFalse(chainCalled.get());
+        assertEquals(401, exchange.getResponse().getStatusCode().value());
+    }
+
+    @Test
+    void shouldRejectCategoryCreateWhenRoleIsNotAdmin() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/products/categories")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer user-token")
+                        .build()
+        );
+
+        when(jwtService.parseClaims("user-token")).thenReturn(claims("buyer-1", "USER"));
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertFalse(chainCalled.get());
+        assertEquals(403, exchange.getResponse().getStatusCode().value());
+    }
+
+    @Test
+    void shouldForwardCategoryCreateWhenRoleIsAdmin() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/products/categories")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer admin-token")
+                        .build()
+        );
+
+        when(jwtService.parseClaims("admin-token")).thenReturn(claims("admin-1", "ADMIN"));
+
+        AtomicReference<ServerWebExchange> forwardedExchange = new AtomicReference<>();
+        GatewayFilterChain chain = serverWebExchange -> {
+            forwardedExchange.set(serverWebExchange);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertEquals("admin-1", forwardedExchange.get().getRequest().getHeaders().getFirst("X-User-Id"));
+        assertEquals("ADMIN", forwardedExchange.get().getRequest().getHeaders().getFirst("X-User-Role"));
+    }
+
+    @Test
+    void shouldRequireAuthenticationForReportSubmissionPath() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/reports").build()
         );
 
         AtomicBoolean chainCalled = new AtomicBoolean(false);
@@ -233,6 +374,29 @@ class AuthenticationFilterTest {
         assertFalse(chainCalled.get());
         assertEquals(403, exchange.getResponse().getStatusCode().value());
         assertTrue(exchange.getResponse().getBodyAsString().block().contains("\"message\":\"Admin role is required\""));
+    }
+
+    @Test
+    void shouldRejectAdminReportRouteWhenRoleIsNotAdmin() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/admin/reports")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer user-token")
+                        .build()
+        );
+
+        when(jwtService.parseClaims("user-token")).thenReturn(claims("buyer-1", "USER"));
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertFalse(chainCalled.get());
+        assertEquals(403, exchange.getResponse().getStatusCode().value());
     }
 
     @Test

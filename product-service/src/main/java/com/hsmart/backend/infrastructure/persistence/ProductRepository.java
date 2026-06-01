@@ -8,6 +8,7 @@ import java.util.List;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -40,6 +41,19 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
     Optional<Product> findByIdAndIsDeletedFalse(Long id);
 
     long countByIsDeletedFalseAndStatusIn(Collection<ProductStatus> statuses);
+
+    @Modifying
+    @Query("update Product product set product.likeCount = product.likeCount + 1 where product.id = :productId")
+    void incrementLikeCount(@Param("productId") Long productId);
+
+    @Modifying
+    @Query("""
+            update Product product
+            set product.likeCount =
+                case when product.likeCount > 0 then product.likeCount - 1 else 0 end
+            where product.id = :productId
+            """)
+    void decrementLikeCount(@Param("productId") Long productId);
 
     @Query(value = """
             select detection.value ->> 'label' as label,

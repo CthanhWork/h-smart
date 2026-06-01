@@ -26,6 +26,16 @@ spring:
           uri: lb://user-service
           predicates:
             - Path=/api/v1/users/**
+        - id: product-category-create-route
+          uri: lb://product-service
+          predicates:
+            - Path=/api/v1/products/categories
+            - Method=POST
+        - id: product-category-read-route
+          uri: lb://product-service
+          predicates:
+            - Path=/api/v1/products/categories
+            - Method=GET
         - id: product-route
           uri: lb://product-service
           predicates:
@@ -47,6 +57,10 @@ spring:
           uri: lb://review-service
           predicates:
             - Path=/api/v1/reviews/**
+        - id: report-route
+          uri: lb://admin-service
+          predicates:
+            - Path=/api/v1/reports/**
         - id: admin-route
           uri: lb://admin-service
           predicates:

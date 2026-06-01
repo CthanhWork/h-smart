@@ -1858,3 +1858,279 @@
   - restored and retained the full historical `project-log.md` content before recording this change
 - Verification:
   - `interaction-service`: `mvn -q test` passed
+
+
+[2026-06-01] structured user addresses and GHTK shipping fee integration added
+
+- Scope:
+  - replaced the legacy free-form user address with structured delivery fields
+  - integrated GHTK shipping fee calculation into order creation
+  - preserved order creation when GHTK is unavailable by falling back to a zero shipping fee
+- Updated `user-service`:
+  - removed the legacy `address` field from `User`
+  - added:
+    - `province`
+    - `district`
+    - `ward`
+    - `streetDetail`
+  - updated register, profile update, and profile response DTOs
+  - added internal endpoint:
+    - `GET /api/v1/users/internal/{userId}/address`
+  - internal address lookup requires `X-Internal-Secret`
+  - response includes structured address fields plus recipient `fullName` and `phoneNumber`
+- Updated `order-service`:
+  - added `shippingFee` and `trackingCode` to `Order`
+  - added `UserServiceClient` for buyer and seller address lookups
+  - added `GhtkShippingClient` using Spring `RestClient`
+  - GHTK fee endpoint:
+    - `GET ${GHTK_API_URL}/services/shipment/fee`
+  - GHTK fee requests send `Token: ${GHTK_API_TOKEN}`
+  - GHTK fee calculation uses seller pickup province and district, buyer delivery province and district, and a configurable default weight
+  - order creation stores `shippingFee`
+  - order amount is calculated as `product.price + shippingFee`
+  - new orders remain `PENDING`
+- Failure handling:
+  - user address lookup and GHTK fee failures are logged in English
+  - missing address data, missing token, timeout, HTTP errors, and malformed GHTK responses fall back to `shippingFee = 0`
+  - checkout remains available when the shipping provider is temporarily unavailable
+- Configuration:
+  - added:
+    - `GHTK_API_URL`
+    - `GHTK_API_TOKEN`
+    - `GHTK_CONNECT_TIMEOUT_MS`
+    - `GHTK_READ_TIMEOUT_MS`
+    - `GHTK_DEFAULT_WEIGHT_GRAMS`
+- Documentation:
+  - updated `user-service/user-service-notes.md`
+  - updated `order-service/order-service-notes.md`
+- Verification:
+  - `user-service`: `mvn -q test` passed
+  - `order-service`: `mvn -q test` passed
+  - full Docker Compose verification was not run because Docker CLI was unavailable in the local shell
+
+
+[2026-06-01] seller confirmation and GHTK shipment webhook added
+
+- Scope:
+  - added seller confirmation for pending orders
+  - registered confirmed orders with GHTK and stored the shipping label
+  - added a GHTK webhook callback that completes delivered orders automatically
+- Order confirmation:
+  - added:
+    - `POST /api/v1/orders/{id}/confirm`
+  - only the order seller can confirm the order
+  - only `PENDING` orders can be confirmed
+  - added `PROCESSING` to `OrderStatus`
+  - confirmation loads buyer and seller delivery details from `user-service`
+  - confirmation calls:
+    - `POST ${GHTK_API_URL}/services/shipment/order`
+  - outbound GHTK payload includes pickup address, delivery address, product name, COD `pick_money`, and product `value`
+  - GHTK `order.label` is stored in `Order.trackingCode`
+  - duplicate GHTK partner-order responses reuse `error.ghtk_label`
+- GHTK webhook:
+  - added:
+    - `POST /api/v1/orders/internal/ghtk-webhook?hash=${GHTK_WEBHOOK_HASH}`
+  - webhook reads GHTK `application/x-www-form-urlencoded` payloads
+  - webhook logs the received payload in English without logging the callback hash
+  - webhook resolves the order by `label_id`
+  - only GHTK `status_id = 5` completes an order
+  - completion changes the order to `COMPLETED`
+  - completion publishes `order.event.completed` through RabbitMQ
+  - repeated delivered callbacks are idempotent and do not publish duplicate events
+- Gateway and security:
+  - `api-gateway` allows the exact GHTK webhook route without JWT
+  - `order-service` validates the query `hash` against `GHTK_WEBHOOK_HASH`
+  - direct order-service calls remain protected by the internal shared secret filter
+- Configuration:
+  - added:
+    - `GHTK_CLIENT_SOURCE`
+    - `GHTK_WEBHOOK_HASH`
+- Documentation:
+  - updated `order-service/order-service-notes.md`
+- Verification:
+  - `order-service`: `12` tests passed
+  - `api-gateway`: authentication tests passed
+  - `git diff --check` passed
+  - direct live GHTK API verification was not run because no production token was used
+
+
+[2026-06-01] product wishlist save and remove toggles added
+
+- Scope:
+  - added authenticated product wishlist support to `product-service`
+  - allowed users to save products, remove saved products, and read a paginated wishlist
+  - exposed cached save counts for product UI displays
+- Database changes:
+  - added `ProductLike`
+  - table: `product_likes`
+  - fields:
+    - `id`
+    - `userId`
+    - `product`
+    - `createdAt`
+  - added unique constraint for `(user_id, product_id)`
+  - added `products.like_count` with SQL default `0`
+- Toggle endpoint:
+  - added:
+    - `POST /api/v1/products/{id}/like`
+  - reads the authenticated user from gateway-forwarded `X-User-Id`
+  - creates a `ProductLike` record when the product is not already saved
+  - returns `Product saved to wishlist`
+  - deletes the existing saved record when the product is already saved
+  - returns `Product removed from wishlist`
+  - updates `Product.likeCount` with atomic database increment and decrement operations
+  - decrement never allows a negative count
+- Wishlist endpoint:
+  - added:
+    - `GET /api/v1/products/wishlist`
+  - returns `ApiResponse<PageResponseDTO<ProductResponseDTO>>`
+  - supports standard `page`, `size`, and `sort` query parameters
+  - defaults to `createdAt DESC`
+  - joins saved records with products
+  - excludes soft-deleted products
+  - excludes products with status `SOLD`
+  - product responses now include `likeCount`
+- Gateway and observability:
+  - wishlist routes remain JWT-protected by the existing gateway product route
+  - added a gateway regression test proving `/api/v1/products/wishlist` returns `401` without a token
+  - wishlist logs and API messages are in English
+- Documentation:
+  - updated `product-service/product-service-notes.md`
+- Verification:
+  - `product-service`: `15` tests passed
+  - `api-gateway`: `22` tests passed
+  - `git diff --check` passed
+
+
+[2026-06-01] admin-service product violation report system added
+
+- Scope:
+  - added user-submitted product violation reports to `admin-service`
+  - added paginated admin review for pending reports
+  - added admin actions to dismiss invalid reports or hide reported products
+- Database changes:
+  - added `Report`
+  - table: `reports`
+  - fields:
+    - `id`
+    - `reporterId`
+    - `productId`
+    - `reason`
+    - `status`
+    - `createdAt`
+  - report status values:
+    - `PENDING`
+    - `RESOLVED`
+    - `DISMISSED`
+- User report submission:
+  - added:
+    - `POST /api/v1/reports`
+  - request payload contains:
+    - `productId`
+    - `reason`
+  - reporter identity is read from gateway-forwarded `X-User-Id`
+  - new reports are saved as `PENDING`
+  - successful response message: `Report submitted successfully`
+- Admin report review:
+  - added:
+    - `GET /api/v1/admin/reports`
+  - returns only `PENDING` reports
+  - supports standard `page`, `size`, and `sort` query parameters
+  - defaults to `createdAt DESC`
+  - returns `ApiResponse<PageResponseDTO<ReportResponseDTO>>`
+- Admin report actions:
+  - added:
+    - `POST /api/v1/admin/reports/{id}/action`
+  - supported actions:
+    - `DISMISS`
+    - `HIDE_PRODUCT`
+  - `DISMISS` changes the report to `DISMISSED`
+  - `HIDE_PRODUCT` calls the product-service internal moderation endpoint with `HIDDEN`
+  - `HIDE_PRODUCT` changes the report to `RESOLVED` only after product-service accepts the update
+  - already processed reports return `409 Conflict`
+  - missing reports return `404 Not Found`
+- Gateway and security:
+  - added gateway route:
+    - `/api/v1/reports/**` -> `lb://admin-service`
+  - report submission requires JWT
+  - admin list and action routes require JWT role `ADMIN`
+  - `admin-service` continues to validate `X-User-Role=ADMIN` for `/api/v1/admin/**`
+  - product-service moderation calls include `X-Internal-Secret`
+- Error handling and observability:
+  - malformed JSON and invalid enum payloads return `400 Bad Request`
+  - runtime API messages and logs are in English
+- Documentation:
+  - updated `admin-service/admin-service-notes.md`
+  - updated `project-log.md`
+- Verification:
+  - `admin-service`: `9` tests passed
+  - `api-gateway`: `24` tests passed
+  - gateway regression tests verify `401` for report submission without JWT and `403` for admin reports with a non-admin role
+  - `git diff --check` passed
+
+
+[2026-06-01] admin account bans, manual moderation, and category control added
+
+- Scope:
+  - added administrative account bans
+  - added manual product approval and rejection for listings flagged by AI moderation
+  - restricted product category creation to administrators while keeping category reads public
+- Updated `user-service`:
+  - added `users.is_active`
+  - default value: `true`
+  - login rejects inactive accounts with:
+    - status: `403 Forbidden`
+    - message: `Account has been banned`
+  - active-account validation runs before password verification and JWT generation
+  - added internal endpoint:
+    - `PUT /api/v1/users/internal/{userId}/status`
+  - internal status request body:
+
+```json
+{
+  "isActive": false
+}
+```
+
+  - internal endpoint requires `X-Internal-Secret`
+- Updated `admin-service`:
+  - added admin endpoint:
+    - `POST /api/v1/admin/users/{userId}/ban`
+  - ban flow calls user-service internal status endpoint with `isActive = false`
+  - added admin endpoint:
+    - `POST /api/v1/admin/products/{productId}/moderate`
+  - supported manual moderation actions:
+    - `APPROVE`
+    - `REJECT`
+  - `APPROVE` changes product status to `APPROVED`
+  - `REJECT` changes product status to `HIDDEN`
+  - manual moderation reuses product-service internal endpoint:
+    - `PUT /api/v1/products/internal/{productId}/moderation-status`
+  - added `admin_notifications.processed`
+  - notification processed default: `false`
+  - manual moderation marks matching unresolved `PRODUCT_PENDING_REVIEW` notifications as processed after product-service accepts the update
+- Updated `api-gateway`:
+  - split category routing by method:
+    - `GET /api/v1/products/categories`
+    - `POST /api/v1/products/categories`
+  - category reads remain public
+  - category creation requires JWT claim `role=ADMIN`
+  - generic product routing remains unchanged for other product endpoints
+- Error handling and observability:
+  - downstream user status update failures return `502 Bad Gateway`
+  - invalid moderation action payloads return `400 Bad Request`
+  - runtime API messages and logs are in English
+- Documentation:
+  - updated `user-service/user-service-notes.md`
+  - updated `admin-service/admin-service-notes.md`
+  - updated `api-gateway/api-gateway-notes.md`
+  - updated `project-log.md`
+- Verification:
+  - user-service tests cover banned login, pre-token ban guard, and internal active-status updates
+  - admin-service tests cover account bans, manual approval, manual rejection, and pending-review notification resolution
+  - api-gateway tests cover public category reads, JWT-required category creation, and admin-only category creation
+  - `user-service`: `18` tests passed
+  - `admin-service`: `12` tests passed
+  - `api-gateway`: `28` tests passed
+  - `git diff --check` passed
+  - Docker Compose validation was not run because Docker CLI was unavailable in the local shell

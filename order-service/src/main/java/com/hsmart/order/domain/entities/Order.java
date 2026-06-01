@@ -41,6 +41,12 @@ public class Order {
     @Column(nullable = false, precision = 12, scale = 2)
     private BigDecimal amount;
 
+    @Column(name = "shipping_fee", nullable = false, precision = 12, scale = 2, columnDefinition = "numeric(12,2) default 0")
+    private BigDecimal shippingFee;
+
+    @Column(name = "tracking_code", length = 100)
+    private String trackingCode;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private OrderStatus status;
@@ -58,6 +64,9 @@ public class Order {
         updatedAt = now;
         if (status == null) {
             status = OrderStatus.PENDING;
+        }
+        if (shippingFee == null) {
+            shippingFee = BigDecimal.ZERO;
         }
     }
 

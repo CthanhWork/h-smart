@@ -40,6 +40,10 @@ public class AdminNotification {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
+    @Builder.Default
+    @Column(nullable = false, columnDefinition = "boolean default false")
+    private boolean processed = false;
+
     @PrePersist
     public void applyDefaults() {
         if (createdAt == null) {

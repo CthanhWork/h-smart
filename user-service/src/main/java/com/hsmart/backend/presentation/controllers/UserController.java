@@ -3,8 +3,10 @@ package com.hsmart.backend.presentation.controllers;
 import com.hsmart.backend.application.dto.ApiResponse;
 import com.hsmart.backend.application.dto.SellerTrustResponseDTO;
 import com.hsmart.backend.application.dto.UpdateProfileRequestDTO;
+import com.hsmart.backend.application.dto.UserAddressResponseDTO;
 import com.hsmart.backend.application.dto.UserProfileResponseDTO;
 import com.hsmart.backend.application.dto.UserStatsResponseDTO;
+import com.hsmart.backend.application.dto.UserStatusUpdateRequestDTO;
 import com.hsmart.backend.service.UserService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -64,5 +66,20 @@ public class UserController {
     public ResponseEntity<ApiResponse<SellerTrustResponseDTO>> getInternalSellerTrust(@PathVariable String sellerId) {
         SellerTrustResponseDTO response = userService.getSellerTrustProfile(sellerId);
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Seller trust profile fetched successfully", response));
+    }
+
+    @GetMapping("/internal/{userId}/address")
+    public ResponseEntity<ApiResponse<UserAddressResponseDTO>> getInternalUserAddress(@PathVariable String userId) {
+        UserAddressResponseDTO response = userService.getUserAddress(userId);
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "User address fetched successfully", response));
+    }
+
+    @PutMapping("/internal/{userId}/status")
+    public ResponseEntity<ApiResponse<Void>> updateInternalUserStatus(
+            @PathVariable String userId,
+            @Valid @RequestBody UserStatusUpdateRequestDTO request
+    ) {
+        userService.updateUserActiveStatus(userId, request.getIsActive());
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "User status updated successfully", null));
     }
 }

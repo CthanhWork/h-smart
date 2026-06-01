@@ -3,7 +3,9 @@ package com.hsmart.admin.infrastructure.user;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hsmart.admin.application.dto.ApiResponse;
 import com.hsmart.admin.application.dto.SellerTrustResponseDTO;
+import com.hsmart.admin.application.dto.UserStatusUpdateRequestDTO;
 import com.hsmart.admin.application.exceptions.UserTrustLookupException;
+import com.hsmart.admin.application.exceptions.UserStatusUpdateException;
 import com.hsmart.admin.service.UserAdminClient;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
@@ -53,6 +55,23 @@ public class UserServiceAdminClient implements UserAdminClient {
         } catch (RestClientException | IllegalArgumentException exception) {
             log.warn("User-service seller trust request failed for seller {}", sellerId, exception);
             throw new UserTrustLookupException("Seller trust lookup failed", exception);
+        }
+    }
+
+    @Override
+    public void updateUserActiveStatus(String userId, boolean active) {
+        try {
+            userServiceRestClient.put()
+                    .uri("/api/v1/users/internal/{userId}/status", userId)
+                    .header(INTERNAL_SECRET_HEADER, internalSharedSecret)
+                    .body(new UserStatusUpdateRequestDTO(active))
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<ApiResponse<Object>>() {
+                    });
+            log.info("User-service active status update completed for user {}", userId);
+        } catch (RestClientException exception) {
+            log.error("User-service active status update failed for user {}", userId, exception);
+            throw new UserStatusUpdateException("User active status update failed", exception);
         }
     }
 }
