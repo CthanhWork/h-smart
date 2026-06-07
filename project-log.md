@@ -2212,3 +2212,16 @@
 - `PolicySearchConfig` now creates its own non-load-balanced client.
 - Product and order clients continue using their qualified load-balanced builders.
 - Added a regression test that registers both downstream load-balanced builders and verifies all external RestClient beans initialize successfully.
+
+[2026-06-08] Elasticsearch restored for the GCP search workload
+
+- Restored Elasticsearch `8.15.3` in `docker-compose-gcp.yml` without restoring Logstash, Kibana, or Zipkin.
+- Elasticsearch remains private on the Docker network with no published host port.
+- Added a persistent Elasticsearch data volume.
+- Limited the Elasticsearch container to `2 GiB` of memory and configured a `1 GiB` JVM heap.
+- Updated `search-service` to use `http://elasticsearch:9200` and wait for Elasticsearch to become healthy.
+- Updated `interaction-service` POLICY retrieval to use the restored Elasticsearch service and wait for it to become healthy.
+- Updated the deployment guide with:
+  - the required `vm.max_map_count` kernel setting
+  - private Elasticsearch health verification
+  - Elasticsearch log inspection and backup coverage

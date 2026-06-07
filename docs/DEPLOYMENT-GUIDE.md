@@ -12,6 +12,7 @@ The first GCP deployment uses a hybrid architecture:
   - MongoDB
   - Redis
   - RabbitMQ
+  - Elasticsearch
 - Local laptop:
   - FastAPI `ai-service`
   - Tailscale provides the private network path from GCP to the laptop
@@ -19,7 +20,6 @@ The first GCP deployment uses a hybrid architecture:
 The GCP Compose file does not include:
 
 - `ai-service`
-- Elasticsearch
 - Logstash
 - Kibana
 - Zipkin
@@ -27,18 +27,14 @@ The GCP Compose file does not include:
 
 Only TCP port `8000` is published by Docker. All databases, brokers, Eureka, and microservices remain reachable only through the internal Docker bridge network.
 
-## 2. Current Search Limitation
+## 2. Search Infrastructure
 
-`search-service` remains defined because it is a core H-Smart service, but Elasticsearch is intentionally excluded from this first deployment.
+Elasticsearch runs as a private, single-node search datastore for:
 
-Until Elasticsearch is restored:
+- product indexing and search through `search-service`
+- POLICY document retrieval through `interaction-service`
 
-- product search can return its configured fallback or an unavailable response
-- POLICY document retrieval in `interaction-service` is degraded
-- product creation, authentication, orders, reviews, moderation, and AI image fallback remain independent of Elasticsearch
-- API Gateway startup does not wait for `search-service`
-
-Restore Elasticsearch in a later deployment before enabling production search traffic.
+The container has a `2 GiB` memory limit and a `1 GiB` JVM heap. Port `9200` is not published to the VPS host.
 
 ## 3. Prepare the GCP VPS
 
@@ -265,6 +261,17 @@ docker compose -f docker-compose-gcp.yml config \
 
 ## 9. Build and Start H-Smart
 
+Configure the Linux virtual memory requirement used by Elasticsearch:
+
+```bash
+echo 'vm.max_map_count=262144' \
+  | sudo tee /etc/sysctl.d/99-elasticsearch.conf
+sudo /sbin/sysctl --system
+sudo /sbin/sysctl vm.max_map_count
+```
+
+The final command must report at least `262144`.
+
 Build images:
 
 ```bash
@@ -304,6 +311,7 @@ Inspect logs:
 docker compose -f docker-compose-gcp.yml logs --tail=200 api-gateway
 docker compose -f docker-compose-gcp.yml logs --tail=200 product-service
 docker compose -f docker-compose-gcp.yml logs --tail=200 admin-service
+docker compose -f docker-compose-gcp.yml logs --tail=200 elasticsearch search-service
 ```
 
 Verify the AI connection from inside `product-service`:
@@ -320,6 +328,15 @@ docker ps --format 'table {{.Names}}\t{{.Ports}}'
 ```
 
 Only `h-smart-api-gateway` should show a host mapping.
+
+Verify Elasticsearch from its private Docker network:
+
+```bash
+docker compose -f docker-compose-gcp.yml exec elasticsearch \
+  curl --fail http://localhost:9200/_cluster/health
+```
+
+Elasticsearch is intentionally not published on the VPS host.
 
 ## 11. Operations
 
@@ -361,6 +378,7 @@ Back up these named volumes:
 - `h-smart-gcp_interaction-mongo-data`
 - `h-smart-gcp_rabbitmq-data`
 - `h-smart-gcp_redis-data`
+- `h-smart-gcp_elasticsearch-data`
 - `h-smart-gcp_product-uploads`
 
 Database-native backups with `pg_dump` and `mongodump` are preferred over copying live volume files.
