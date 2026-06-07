@@ -2202,3 +2202,13 @@
   - only API Gateway publishes host port `8000`
   - all nine Spring Boot services render with an `800 MiB` memory limit and a `512 MiB` JVM heap
   - rendered configuration contains no `ai-service`, Elasticsearch, Logstash, Kibana, or Zipkin service
+
+[2026-06-08] interaction-service external RestClient bean ambiguity fixed
+
+- Fixed `interaction-service` startup failure caused by multiple `RestClient.Builder` beans.
+- `AssistantConfig` now creates dedicated non-load-balanced clients for:
+  - cloud AI provider requests
+  - intent classification requests
+- `PolicySearchConfig` now creates its own non-load-balanced client.
+- Product and order clients continue using their qualified load-balanced builders.
+- Added a regression test that registers both downstream load-balanced builders and verifies all external RestClient beans initialize successfully.

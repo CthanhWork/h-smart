@@ -12,12 +12,12 @@ public class PolicySearchConfig {
 
     @Bean
     @Qualifier("policySearchRestClient")
-    public RestClient policySearchRestClient(RestClient.Builder builder, PolicySearchProperties properties) {
+    public RestClient policySearchRestClient(PolicySearchProperties properties) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofMillis(properties.connectTimeoutMs()));
         requestFactory.setReadTimeout(Duration.ofMillis(properties.readTimeoutMs()));
 
-        return builder
+        return RestClient.builder()
                 .baseUrl(properties.baseUrl())
                 .requestFactory(requestFactory)
                 .build();

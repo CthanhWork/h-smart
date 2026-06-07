@@ -13,12 +13,12 @@ public class AssistantConfig {
 
     @Bean
     @Qualifier("aiProviderRestClient")
-    public RestClient aiProviderRestClient(RestClient.Builder builder, AssistantProperties properties) {
+    public RestClient aiProviderRestClient(AssistantProperties properties) {
         ClientHttpRequestFactorySettings settings = ClientHttpRequestFactorySettings.DEFAULTS
                 .withConnectTimeout(Duration.ofMillis(resolveTimeout(properties.connectTimeoutMs(), 2_000)))
                 .withReadTimeout(Duration.ofMillis(resolveTimeout(properties.readTimeoutMs(), 60_000)));
 
-        return builder
+        return RestClient.builder()
                 .baseUrl(properties.providerUrl())
                 .requestFactory(ClientHttpRequestFactories.get(settings))
                 .build();
@@ -27,7 +27,6 @@ public class AssistantConfig {
     @Bean
     @Qualifier("intentClassifierRestClient")
     public RestClient intentClassifierRestClient(
-            RestClient.Builder builder,
             AssistantProperties assistantProperties,
             IntentClassifierProperties classifierProperties
     ) {
@@ -35,7 +34,7 @@ public class AssistantConfig {
                 .withConnectTimeout(Duration.ofMillis(resolveTimeout(classifierProperties.connectTimeoutMs(), 1_000)))
                 .withReadTimeout(Duration.ofMillis(resolveTimeout(classifierProperties.readTimeoutMs(), 5_000)));
 
-        return builder
+        return RestClient.builder()
                 .baseUrl(assistantProperties.providerUrl())
                 .requestFactory(ClientHttpRequestFactories.get(settings))
                 .build();
