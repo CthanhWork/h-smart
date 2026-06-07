@@ -2134,3 +2134,71 @@
   - `api-gateway`: `28` tests passed
   - `git diff --check` passed
   - Docker Compose validation was not run because Docker CLI was unavailable in the local shell
+
+[2026-06-08] hybrid AI fail-safe product creation added
+
+- Updated `product-service` product creation:
+  - AI service connection and timeout failures no longer reject product creation
+  - failed AI analysis stores empty metadata
+  - blank titles fall back to `Uncategorized Product`
+  - affected products are forced to `PENDING_REVIEW`
+  - successful database writes still publish `product.event.created` after commit
+  - fallback responses return `201 Created` with:
+    - `Product created successfully but requires manual review due to AI service unavailability.`
+  - warning logs include the saved product ID and AI failure details
+- Updated `docker-compose.yml`:
+  - removed the `ai-service` startup dependency from `product-service`
+  - removed the `ai-service` startup dependency from `api-gateway`
+  - both services can now start while the laptop-hosted AI endpoint is offline
+- Documentation:
+  - updated `product-service/product-service-notes.md`
+  - updated `project-log.md`
+- Verification:
+  - `product-service`: `18` tests passed
+  - Docker Compose configuration validation passed with Compose `2.40.3`
+  - built and started `product-service` without starting `ai-service`
+  - runtime product creation returned `201 Created`
+  - runtime fallback returned `Uncategorized Product`, empty AI metadata, and `PENDING_REVIEW`
+  - PostgreSQL persistence was verified
+  - RabbitMQ product-created event publishing after commit was verified from application logs
+  - runtime smoke-test database and image artifacts were removed after verification
+
+[2026-06-08] hardened GCP hybrid deployment configuration added
+
+- Added `docker-compose-gcp.yml` for the first H-Smart VPS deployment.
+- Hybrid architecture:
+  - GCP runs the gateway, discovery server, core Spring Boot services, databases, RabbitMQ, and Redis
+  - laptop-hosted `ai-service` is reached through `EXTERNAL_AI_SERVICE_URL`
+  - `ai-service` is not included in the GCP Compose file
+- Initial deployment exclusions:
+  - Elasticsearch
+  - Logstash
+  - Kibana
+  - Zipkin
+  - legacy `backend-service`
+- Security hardening:
+  - only API Gateway publishes host port `8000`
+  - PostgreSQL, MongoDB, Redis, RabbitMQ, Eureka, and ports `8081` through `8087` remain internal
+  - database, broker, Redis, JWT, and internal-service credentials are loaded from `.env`
+- Resource configuration:
+  - every Spring Boot container has `mem_limit: 800m`
+  - every Spring Boot JVM receives `JAVA_OPTS=-Xms512m -Xmx512m`
+  - the Compose entrypoint override ensures `JAVA_OPTS` is applied despite exec-form Dockerfile entrypoints
+- Added missing GCP definitions:
+  - `admin-postgres-db`
+  - `admin-service`
+  - persistent Redis and product upload volumes
+- AI routing:
+  - `product-service.AI_SERVICE_BASE_URL` uses `EXTERNAL_AI_SERVICE_URL`
+  - `api-gateway.AI_SERVICE_URL` uses `EXTERNAL_AI_SERVICE_URL`
+- Documentation:
+  - added `docs/DEPLOYMENT-GUIDE.md`
+  - documented Docker installation, GCP firewall rules, Tailscale connectivity, `.env`, deployment, verification, operations, and backups
+- Known first-deployment limitation:
+  - `search-service` is included but product search and POLICY retrieval remain degraded until Elasticsearch is restored
+- Verification:
+  - `docker compose -f docker-compose-gcp.yml config --quiet` passed
+  - rendered configuration contains all 17 required services and infrastructure containers
+  - only API Gateway publishes host port `8000`
+  - all nine Spring Boot services render with an `800 MiB` memory limit and a `512 MiB` JVM heap
+  - rendered configuration contains no `ai-service`, Elasticsearch, Logstash, Kibana, or Zipkin service

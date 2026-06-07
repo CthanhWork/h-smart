@@ -1,17 +1,21 @@
 package com.hsmart.backend.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hsmart.backend.application.dto.ApiResponse;
 import com.hsmart.backend.application.dto.PageResponseDTO;
 import com.hsmart.backend.application.dto.ProductRequestDTO;
 import com.hsmart.backend.application.dto.ProductResponseDTO;
+import com.hsmart.backend.application.exceptions.AiServiceUnavailableException;
 import com.hsmart.backend.application.exceptions.OwnershipDeniedException;
 import com.hsmart.backend.application.mapper.ProductMapper;
 import com.hsmart.backend.application.mapper.ProductNamingSupport;
@@ -25,14 +29,19 @@ import com.hsmart.backend.infrastructure.messaging.ProductEventPublisher;
 import com.hsmart.backend.infrastructure.persistence.CategoryRepository;
 import com.hsmart.backend.infrastructure.persistence.ProductLikeRepository;
 import com.hsmart.backend.infrastructure.persistence.ProductRepository;
+import com.hsmart.backend.presentation.controllers.ProductController;
+import com.hsmart.backend.service.ProductService;
 import com.hsmart.backend.service.VisionService;
+import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Optional;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -40,9 +49,15 @@ import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.mock.web.MockMultipartFile;
 
 @ExtendWith(MockitoExtension.class)
 class ProductServiceImplTest {
+
+    @TempDir
+    private Path uploadDirectory;
 
     @Mock
     private VisionService visionService;
@@ -72,12 +87,114 @@ class ProductServiceImplTest {
                 productLikeRepository,
                 categoryRepository,
                 new ObjectMapper(),
-                new StorageProperties("uploads"),
+                new StorageProperties(uploadDirectory.toString()),
                 new ApplicationProperties("http://localhost:8000"),
                 productMapper,
                 new ProductNamingSupport(),
                 productEventPublisher
         );
+    }
+
+    @Test
+    void createProductShouldRequireManualReviewWhenAiServiceIsUnavailable() throws IOException {
+        UserContextHolder.setCurrentUserId("seller-1");
+        MockMultipartFile image = new MockMultipartFile(
+                "file",
+                "desk.jpg",
+                "image/jpeg",
+                new byte[]{1, 2, 3}
+        );
+        ProductRequestDTO request = ProductRequestDTO.builder()
+                .title(" ")
+                .description("Used desk")
+                .price(BigDecimal.valueOf(100))
+                .build();
+        Product pendingProduct = Product.builder()
+                .id(25L)
+                .title("Uncategorized Product")
+                .description("Used desk")
+                .price(BigDecimal.valueOf(100))
+                .status(ProductStatus.PENDING_REVIEW)
+                .sellerId("seller-1")
+                .aiMetadata("[]")
+                .build();
+        ProductResponseDTO response = ProductResponseDTO.builder()
+                .id(25L)
+                .title("Uncategorized Product")
+                .status(ProductStatus.PENDING_REVIEW)
+                .aiMetadata(List.of())
+                .build();
+
+        when(visionService.detectObjects(image)).thenThrow(
+                new AiServiceUnavailableException("AI service is unavailable", new IOException("Connection refused"))
+        );
+        when(productMapper.toEntity(
+                eq("Used desk"),
+                eq(BigDecimal.valueOf(100)),
+                eq(ProductStatus.PENDING_REVIEW),
+                eq("seller-1"),
+                eq(null),
+                eq("Uncategorized Product"),
+                argThat(imageUrl -> imageUrl.startsWith("api/v1/products/media/")),
+                eq("[]")
+        )).thenReturn(pendingProduct);
+        when(productRepository.save(pendingProduct)).thenReturn(pendingProduct);
+        when(productMapper.toResponse(eq(pendingProduct), anyList(), eq("http://localhost:8000")))
+                .thenReturn(response);
+
+        ProductResponseDTO result = productService.createProduct(request, image);
+
+        Assertions.assertEquals(ProductStatus.PENDING_REVIEW, result.getStatus());
+        Assertions.assertEquals("Uncategorized Product", result.getTitle());
+        Assertions.assertTrue(result.getAiMetadata().isEmpty());
+        verify(productRepository).save(pendingProduct);
+        verify(productEventPublisher).publishProductCreated(argThat(event ->
+                event.getId().equals(25L)
+                        && event.getStatus().equals("PENDING_REVIEW")
+                        && event.getAiMetadata().isEmpty()
+        ));
+        verify(productMapper).toEntity(
+                eq("Used desk"),
+                eq(BigDecimal.valueOf(100)),
+                eq(ProductStatus.PENDING_REVIEW),
+                eq("seller-1"),
+                eq(null),
+                eq("Uncategorized Product"),
+                any(String.class),
+                eq("[]")
+        );
+    }
+
+    @Test
+    void createProductControllerShouldReturnManualReviewMessageForAiFallback() throws IOException {
+        ProductService productServiceMock = mock(ProductService.class);
+        ProductController controller = new ProductController(productServiceMock, null);
+        ProductRequestDTO request = ProductRequestDTO.builder()
+                .price(BigDecimal.valueOf(100))
+                .build();
+        MockMultipartFile image = new MockMultipartFile(
+                "file",
+                "desk.jpg",
+                "image/jpeg",
+                new byte[]{1, 2, 3}
+        );
+        ProductResponseDTO product = ProductResponseDTO.builder()
+                .id(25L)
+                .title("Uncategorized Product")
+                .status(ProductStatus.PENDING_REVIEW)
+                .build();
+        when(productServiceMock.createProduct(request, image)).thenReturn(product);
+
+        ResponseEntity<ApiResponse<ProductResponseDTO>> response = controller.createProduct(request, image);
+
+        Assertions.assertEquals(HttpStatus.CREATED, response.getStatusCode());
+        Assertions.assertNotNull(response.getBody());
+        Assertions.assertEquals(
+                "Product created successfully but requires manual review due to AI service unavailability.",
+                response.getBody().getMessage()
+        );
+        Assertions.assertEquals(product, response.getBody().getData());
+        verify(productServiceMock).createProduct(request, image);
     }
 
     @AfterEach

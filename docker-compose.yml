@@ -314,8 +314,6 @@ services:
     depends_on:
       discovery-server:
         condition: service_healthy
-      ai-service:
-        condition: service_healthy
       product-postgres-db:
         condition: service_healthy
       rabbitmq:
@@ -544,8 +542,6 @@ services:
       INTERNAL_SHARED_SECRET: ${INTERNAL_SHARED_SECRET:?Set INTERNAL_SHARED_SECRET in .env or shell before starting Docker Compose}
     depends_on:
       discovery-server:
-        condition: service_healthy
-      ai-service:
         condition: service_healthy
       user-service:
         condition: service_healthy

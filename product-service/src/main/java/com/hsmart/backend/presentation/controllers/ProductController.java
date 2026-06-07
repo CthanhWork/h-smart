@@ -39,6 +39,10 @@ import org.springframework.web.server.ResponseStatusException;
 @RequiredArgsConstructor
 public class ProductController {
 
+    private static final String PRODUCT_CREATED_MESSAGE = "Product created successfully";
+    private static final String PRODUCT_CREATED_WITH_MANUAL_REVIEW_MESSAGE =
+            "Product created successfully but requires manual review due to AI service unavailability.";
+
     private final ProductService productService;
     private final ProductImageAnalysisService productImageAnalysisService;
 
@@ -52,8 +56,11 @@ public class ProductController {
         }
 
         ProductResponseDTO response = productService.createProduct(request, file);
+        String message = response.getStatus() == ProductStatus.PENDING_REVIEW
+                ? PRODUCT_CREATED_WITH_MANUAL_REVIEW_MESSAGE
+                : PRODUCT_CREATED_MESSAGE;
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success(HttpStatus.CREATED, "Product created successfully", response));
+                .body(ApiResponse.success(HttpStatus.CREATED, message, response));
     }
 
     @PostMapping(value = "/analyze-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)

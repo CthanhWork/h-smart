@@ -10,6 +10,8 @@ import com.hsmart.backend.application.dto.ProductResponseDTO;
 import com.hsmart.backend.application.dto.ProductSearchEvent;
 import com.hsmart.backend.application.dto.ProductSoldEvent;
 import com.hsmart.backend.application.dto.ProductStatsResponseDTO;
+import com.hsmart.backend.application.exceptions.AiServiceTimeoutException;
+import com.hsmart.backend.application.exceptions.AiServiceUnavailableException;
 import com.hsmart.backend.application.exceptions.CategoryNotFoundException;
 import com.hsmart.backend.application.exceptions.FileProcessingException;
 import com.hsmart.backend.application.exceptions.MissingUserContextException;
@@ -59,6 +61,8 @@ import org.springframework.http.HttpStatus;
 @Transactional
 public class ProductServiceImpl implements ProductService {
 
+    private static final String FALLBACK_PRODUCT_TITLE = "Uncategorized Product";
+
     private final VisionService visionService;
     private final ProductRepository productRepository;
     private final ProductLikeRepository productLikeRepository;
@@ -75,12 +79,27 @@ public class ProductServiceImpl implements ProductService {
         String sellerId = getCurrentUserId();
 
         Category category = resolveCategory(request.getCategoryId());
-        PredictResponseDTO predictResponse = visionService.detectObjects(image);
-        String aiMetadataJson = objectMapper.writeValueAsString(predictResponse.getDetections());
+        List<DetectionDTO> detections = Collections.emptyList();
+        RuntimeException aiServiceFailure = null;
+
+        try {
+            PredictResponseDTO predictResponse = visionService.detectObjects(image);
+            if (predictResponse.getDetections() != null) {
+                detections = predictResponse.getDetections();
+            }
+        } catch (AiServiceUnavailableException | AiServiceTimeoutException exception) {
+            aiServiceFailure = exception;
+        }
+
+        String aiMetadataJson = objectMapper.writeValueAsString(detections);
         String relativeImageUrl = saveUploadedFile(image);
-        String resolvedTitle = productNamingSupport.resolveTitle(request.getTitle(), predictResponse.getDetections());
+        String resolvedTitle = aiServiceFailure != null && !StringUtils.hasText(request.getTitle())
+                ? FALLBACK_PRODUCT_TITLE
+                : productNamingSupport.resolveTitle(request.getTitle(), detections);
         validateClientManagedStatus(request.getStatus());
-        ProductStatus resolvedStatus = request.getStatus() != null ? request.getStatus() : ProductStatus.ACTIVE;
+        ProductStatus resolvedStatus = aiServiceFailure != null
+                ? ProductStatus.PENDING_REVIEW
+                : request.getStatus() != null ? request.getStatus() : ProductStatus.ACTIVE;
 
         Product product = productMapper.toEntity(
                 request.getDescription(),
@@ -95,7 +114,17 @@ public class ProductServiceImpl implements ProductService {
 
         Product savedProduct = productRepository.save(product);
         publishProductCreatedAfterCommit(savedProduct);
-        log.info("Created product {} for seller {}", savedProduct.getId(), savedProduct.getSellerId());
+        if (aiServiceFailure != null) {
+            log.warn(
+                    "Created product {} with PENDING_REVIEW because AI image analysis failed: {}. Root cause: {}",
+                    savedProduct.getId(),
+                    aiServiceFailure.getMessage(),
+                    getRootCauseMessage(aiServiceFailure),
+                    aiServiceFailure
+            );
+        } else {
+            log.info("Created product {} for seller {}", savedProduct.getId(), savedProduct.getSellerId());
+        }
         return toProductResponse(savedProduct);
     }
 
@@ -266,6 +295,16 @@ public class ProductServiceImpl implements ProductService {
 
     private boolean isTransitionToSold(ProductStatus previousStatus, ProductStatus currentStatus) {
         return previousStatus != ProductStatus.SOLD && currentStatus == ProductStatus.SOLD;
+    }
+
+    private String getRootCauseMessage(Throwable exception) {
+        Throwable rootCause = exception;
+        while (rootCause.getCause() != null) {
+            rootCause = rootCause.getCause();
+        }
+        return StringUtils.hasText(rootCause.getMessage())
+                ? rootCause.getMessage()
+                : rootCause.getClass().getSimpleName();
     }
 
     private void validateClientManagedStatus(ProductStatus status) {

@@ -1,0 +1,538 @@
+name: h-smart-gcp
+
+x-spring-service: &spring-service
+  restart: unless-stopped
+  mem_limit: 800m
+  entrypoint:
+    - sh
+    - -c
+    - exec java $${JAVA_OPTS} -jar /app/app.jar
+  networks:
+    - h-smart-internal
+
+x-spring-environment: &spring-environment
+  JAVA_OPTS: "-Xms512m -Xmx512m"
+  EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+  INTERNAL_SHARED_SECRET: ${INTERNAL_SHARED_SECRET:?INTERNAL_SHARED_SECRET is required}
+
+x-healthcheck: &spring-healthcheck
+  interval: 10s
+  timeout: 5s
+  retries: 10
+  start_period: 30s
+
+services:
+  user-postgres-db:
+    image: postgres:16-alpine
+    container_name: h-smart-user-postgres-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hsmart_user_db
+      POSTGRES_USER: ${POSTGRES_USER:-hsmart}
+      POSTGRES_PASSWORD: ${USER_DB_PASSWORD:?USER_DB_PASSWORD is required}
+    volumes:
+      - user-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - h-smart-internal
+
+  product-postgres-db:
+    image: postgres:16-alpine
+    container_name: h-smart-product-postgres-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hsmart_product_db
+      POSTGRES_USER: ${POSTGRES_USER:-hsmart}
+      POSTGRES_PASSWORD: ${PRODUCT_DB_PASSWORD:?PRODUCT_DB_PASSWORD is required}
+    volumes:
+      - product-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - h-smart-internal
+
+  order-postgres-db:
+    image: postgres:16-alpine
+    container_name: h-smart-order-postgres-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hsmart_order_db
+      POSTGRES_USER: ${POSTGRES_USER:-hsmart}
+      POSTGRES_PASSWORD: ${ORDER_DB_PASSWORD:?ORDER_DB_PASSWORD is required}
+    volumes:
+      - order-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - h-smart-internal
+
+  review-postgres-db:
+    image: postgres:16-alpine
+    container_name: h-smart-review-postgres-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hsmart_review_db
+      POSTGRES_USER: ${POSTGRES_USER:-hsmart}
+      POSTGRES_PASSWORD: ${REVIEW_DB_PASSWORD:?REVIEW_DB_PASSWORD is required}
+    volumes:
+      - review-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - h-smart-internal
+
+  admin-postgres-db:
+    image: postgres:16-alpine
+    container_name: h-smart-admin-postgres-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hsmart_admin_db
+      POSTGRES_USER: ${POSTGRES_USER:-hsmart}
+      POSTGRES_PASSWORD: ${ADMIN_DB_PASSWORD:?ADMIN_DB_PASSWORD is required}
+    volumes:
+      - admin-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - h-smart-internal
+
+  interaction-mongo-db:
+    image: mongo:7
+    container_name: h-smart-interaction-mongo-db
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-hsmart}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD is required}
+    volumes:
+      - interaction-mongo-data:/data/db
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mongosh --quiet --username "$$MONGO_INITDB_ROOT_USERNAME" --password "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping').ok" localhost:27017/admin | grep 1
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - h-smart-internal
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: h-smart-rabbitmq
+    restart: unless-stopped
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-hsmart}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    networks:
+      - h-smart-internal
+
+  redis:
+    image: redis:7-alpine
+    container_name: h-smart-redis
+    restart: unless-stopped
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command:
+      - sh
+      - -c
+      - exec redis-server --appendonly yes --requirepass "$$REDIS_PASSWORD"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - h-smart-internal
+
+  discovery-server:
+    <<: *spring-service
+    build:
+      context: ./discovery-server
+      dockerfile: Dockerfile
+    container_name: h-smart-discovery-server
+    environment:
+      <<: *spring-environment
+      SERVER_PORT: "8761"
+      EUREKA_INSTANCE_HOSTNAME: discovery-server
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "0.0"
+    healthcheck:
+      <<: *spring-healthcheck
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8761/actuator/health || exit 1"]
+
+  user-service:
+    <<: *spring-service
+    build:
+      context: ./user-service
+      dockerfile: Dockerfile
+    container_name: h-smart-user-service
+    environment:
+      <<: *spring-environment
+      SERVER_PORT: "8081"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://user-postgres-db:5432/hsmart_user_db
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-hsmart}
+      SPRING_DATASOURCE_PASSWORD: ${USER_DB_PASSWORD:?USER_DB_PASSWORD is required}
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-hsmart}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      JWT_EXPIRATION_MS: ${JWT_EXPIRATION_MS:-86400000}
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "0.0"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      user-postgres-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      <<: *spring-healthcheck
+      test:
+        - CMD-SHELL
+        - 'curl -fsS -H "X-Internal-Secret: $$INTERNAL_SHARED_SECRET" http://localhost:8081/health || exit 1'
+
+  product-service:
+    <<: *spring-service
+    build:
+      context: ./product-service
+      dockerfile: Dockerfile
+    container_name: h-smart-product-service
+    environment:
+      <<: *spring-environment
+      SERVER_PORT: "8082"
+      APP_PUBLIC_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
+      AI_SERVICE_BASE_URL: ${EXTERNAL_AI_SERVICE_URL:?EXTERNAL_AI_SERVICE_URL is required}
+      AI_SERVICE_CONNECT_TIMEOUT_MS: ${AI_SERVICE_CONNECT_TIMEOUT_MS:-2000}
+      AI_SERVICE_READ_TIMEOUT_MS: ${AI_SERVICE_READ_TIMEOUT_MS:-5000}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://product-postgres-db:5432/hsmart_product_db
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-hsmart}
+      SPRING_DATASOURCE_PASSWORD: ${PRODUCT_DB_PASSWORD:?PRODUCT_DB_PASSWORD is required}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      PRICING_AVERAGE_REFRESH_CRON: ${PRICING_AVERAGE_REFRESH_CRON:-0 0 * * * *}
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-hsmart}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      STORAGE_UPLOAD_DIR: /app/uploads
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "0.0"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      product-postgres-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - product-uploads:/app/uploads
+    healthcheck:
+      <<: *spring-healthcheck
+      test:
+        - CMD-SHELL
+        - 'curl -fsS -H "X-Internal-Secret: $$INTERNAL_SHARED_SECRET" http://localhost:8082/health || exit 1'
+
+  order-service:
+    <<: *spring-service
+    build:
+      context: ./order-service
+      dockerfile: Dockerfile
+    container_name: h-smart-order-service
+    environment:
+      <<: *spring-environment
+      SERVER_PORT: "8085"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://order-postgres-db:5432/hsmart_order_db
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-hsmart}
+      SPRING_DATASOURCE_PASSWORD: ${ORDER_DB_PASSWORD:?ORDER_DB_PASSWORD is required}
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-hsmart}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      PRODUCT_SERVICE_BASE_URL: http://product-service:8082
+      PRODUCT_SERVICE_CONNECT_TIMEOUT_MS: "2000"
+      PRODUCT_SERVICE_READ_TIMEOUT_MS: "3000"
+      USER_SERVICE_BASE_URL: http://user-service:8081
+      USER_SERVICE_CONNECT_TIMEOUT_MS: "2000"
+      USER_SERVICE_READ_TIMEOUT_MS: "3000"
+      GHTK_API_URL: ${GHTK_API_URL:-https://services.giaohangtietkiem.vn}
+      GHTK_API_TOKEN: ${GHTK_API_TOKEN:-}
+      GHTK_CONNECT_TIMEOUT_MS: "2000"
+      GHTK_READ_TIMEOUT_MS: "5000"
+      GHTK_DEFAULT_WEIGHT_GRAMS: "1000"
+      GHTK_CLIENT_SOURCE: ${GHTK_CLIENT_SOURCE:-}
+      GHTK_WEBHOOK_HASH: ${GHTK_WEBHOOK_HASH:-}
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "0.0"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      order-postgres-db:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      <<: *spring-healthcheck
+      test:
+        - CMD-SHELL
+        - 'curl -fsS -H "X-Internal-Secret: $$INTERNAL_SHARED_SECRET" http://localhost:8085/health || exit 1'
+
+  review-service:
+    <<: *spring-service
+    build:
+      context: ./review-service
+      dockerfile: Dockerfile
+    container_name: h-smart-review-service
+    environment:
+      <<: *spring-environment
+      SERVER_PORT: "8086"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://review-postgres-db:5432/hsmart_review_db
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-hsmart}
+      SPRING_DATASOURCE_PASSWORD: ${REVIEW_DB_PASSWORD:?REVIEW_DB_PASSWORD is required}
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-hsmart}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      ORDER_SERVICE_BASE_URL: http://order-service:8085
+      ORDER_SERVICE_CONNECT_TIMEOUT_MS: "2000"
+      ORDER_SERVICE_READ_TIMEOUT_MS: "3000"
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "0.0"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      review-postgres-db:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      <<: *spring-healthcheck
+      test:
+        - CMD-SHELL
+        - 'curl -fsS -H "X-Internal-Secret: $$INTERNAL_SHARED_SECRET" http://localhost:8086/health || exit 1'
+
+  interaction-service:
+    <<: *spring-service
+    build:
+      context: ./interaction-service
+      dockerfile: Dockerfile
+    container_name: h-smart-interaction-service
+    environment:
+      <<: *spring-environment
+      SERVER_PORT: "8083"
+      SPRING_DATA_MONGODB_URI: mongodb://${MONGO_ROOT_USERNAME:-hsmart}:${MONGO_ROOT_PASSWORD:?MONGO_ROOT_PASSWORD is required}@interaction-mongo-db:27017/hsmart_interaction_db?authSource=admin
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-hsmart}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      AI_PROVIDER_URL: ${AI_PROVIDER_URL:-https://api.openai.com/v1}
+      AI_PROVIDER_API_KEY: ${AI_PROVIDER_API_KEY:?AI_PROVIDER_API_KEY is required}
+      AI_PROVIDER_MODEL: ${AI_PROVIDER_MODEL:?AI_PROVIDER_MODEL is required}
+      AI_PROVIDER_CONNECT_TIMEOUT_MS: "2000"
+      AI_PROVIDER_READ_TIMEOUT_MS: "60000"
+      ASSISTANT_INTENT_CLASSIFIER_CONNECT_TIMEOUT_MS: "1000"
+      ASSISTANT_INTENT_CLASSIFIER_READ_TIMEOUT_MS: "5000"
+      ASSISTANT_HISTORY_LIMIT: "10"
+      PRODUCT_SERVICE_BASE_URL: http://product-service:8082
+      PRODUCT_SERVICE_PAGE_SIZE: "30"
+      PRODUCT_SERVICE_CONNECT_TIMEOUT_MS: "2000"
+      PRODUCT_SERVICE_READ_TIMEOUT_MS: "3000"
+      ORDER_SERVICE_BASE_URL: http://order-service:8085
+      ORDER_SERVICE_CONNECT_TIMEOUT_MS: "2000"
+      ORDER_SERVICE_READ_TIMEOUT_MS: "3000"
+      POLICY_SEARCH_BASE_URL: http://elasticsearch-disabled:9200
+      POLICY_SEARCH_INDEX_NAME: hsmart-policy-index
+      POLICY_SEARCH_PAGE_SIZE: "2"
+      POLICY_SEARCH_CONNECT_TIMEOUT_MS: "1000"
+      POLICY_SEARCH_READ_TIMEOUT_MS: "3000"
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "0.0"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      interaction-mongo-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+    healthcheck:
+      <<: *spring-healthcheck
+      test:
+        - CMD-SHELL
+        - 'curl -fsS -H "X-Internal-Secret: $$INTERNAL_SHARED_SECRET" http://localhost:8083/health || exit 1'
+
+  search-service:
+    <<: *spring-service
+    build:
+      context: ./search-service
+      dockerfile: Dockerfile
+    container_name: h-smart-search-service
+    environment:
+      <<: *spring-environment
+      SERVER_PORT: "8084"
+      SPRING_ELASTICSEARCH_URIS: http://elasticsearch-disabled:9200
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-hsmart}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "0.0"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      <<: *spring-healthcheck
+      test:
+        - CMD-SHELL
+        - 'curl -fsS -H "X-Internal-Secret: $$INTERNAL_SHARED_SECRET" http://localhost:8084/health || exit 1'
+
+  admin-service:
+    <<: *spring-service
+    build:
+      context: ./admin-service
+      dockerfile: Dockerfile
+    container_name: h-smart-admin-service
+    environment:
+      <<: *spring-environment
+      SERVER_PORT: "8087"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://admin-postgres-db:5432/hsmart_admin_db
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-hsmart}
+      SPRING_DATASOURCE_PASSWORD: ${ADMIN_DB_PASSWORD:?ADMIN_DB_PASSWORD is required}
+      SPRING_RABBITMQ_HOST: rabbitmq
+      SPRING_RABBITMQ_PORT: "5672"
+      SPRING_RABBITMQ_USERNAME: ${RABBITMQ_USER:-hsmart}
+      SPRING_RABBITMQ_PASSWORD: ${RABBITMQ_PASSWORD:?RABBITMQ_PASSWORD is required}
+      PRODUCT_SERVICE_BASE_URL: http://product-service:8082
+      PRODUCT_SERVICE_CONNECT_TIMEOUT_MS: "2000"
+      PRODUCT_SERVICE_READ_TIMEOUT_MS: "3000"
+      USER_SERVICE_BASE_URL: http://user-service:8081
+      USER_SERVICE_CONNECT_TIMEOUT_MS: "2000"
+      USER_SERVICE_READ_TIMEOUT_MS: "3000"
+      ORDER_SERVICE_BASE_URL: http://order-service:8085
+      ORDER_SERVICE_CONNECT_TIMEOUT_MS: "2000"
+      ORDER_SERVICE_READ_TIMEOUT_MS: "3000"
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "0.0"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      admin-postgres-db:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      <<: *spring-healthcheck
+      test:
+        - CMD-SHELL
+        - 'curl -fsS -H "X-Internal-Secret: $$INTERNAL_SHARED_SECRET" http://localhost:8087/health || exit 1'
+
+  api-gateway:
+    <<: *spring-service
+    build:
+      context: ./api-gateway
+      dockerfile: Dockerfile
+    container_name: h-smart-api-gateway
+    environment:
+      <<: *spring-environment
+      SERVER_PORT: "8000"
+      AI_SERVICE_URL: ${EXTERNAL_AI_SERVICE_URL:?EXTERNAL_AI_SERVICE_URL is required}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
+      GATEWAY_RESPONSE_TIMEOUT: ${GATEWAY_RESPONSE_TIMEOUT:-120s}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: "6379"
+      SPRING_DATA_REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+      ASSISTANT_RATE_LIMIT_REPLENISH_RATE: "5"
+      ASSISTANT_RATE_LIMIT_BURST_CAPACITY: "10"
+      ASSISTANT_RATE_LIMIT_REFILL_PERIOD_SECONDS: "60"
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "0.0"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      user-service:
+        condition: service_healthy
+      product-service:
+        condition: service_healthy
+      interaction-service:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+      review-service:
+        condition: service_healthy
+      admin-service:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8000:8000"
+    healthcheck:
+      <<: *spring-healthcheck
+      test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
+
+networks:
+  h-smart-internal:
+    name: h-smart-gcp-internal
+    driver: bridge
+
+volumes:
+  user-postgres-data:
+  product-postgres-data:
+  order-postgres-data:
+  review-postgres-data:
+  admin-postgres-data:
+  interaction-mongo-data:
+  rabbitmq-data:
+  redis-data:
+  product-uploads:
