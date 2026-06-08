@@ -10,6 +10,7 @@ import static org.mockito.Mockito.when;
 
 import com.hsmart.backend.application.dto.AssistantChatMessage;
 import com.hsmart.backend.application.dto.AssistantProductContext;
+import com.hsmart.backend.application.dto.ChatMessageResponseDTO;
 import com.hsmart.backend.application.dto.IntentClassification;
 import com.hsmart.backend.application.dto.IntentClassification.Intent;
 import com.hsmart.backend.application.dto.OrderSummary;
@@ -293,6 +294,47 @@ class AssistantServiceImplTest {
         assertEquals(true, prompt.get(1).content().contains("Condition: Used, minor scratch"));
         assertEquals(true, prompt.get(1).content().contains("Price: 1500000 VND"));
         verifyNoInteractions(chatMessageRepository, intentClassifier, orderClient, policySearchService, productContextService);
+    }
+
+    @Test
+    void getHistoryShouldReturnMessagesInChronologicalOrder() {
+        AssistantServiceImpl assistantService = newAssistantService();
+        ChatMessage latest = ChatMessage.builder()
+                .id("message-2")
+                .senderId("h-smart-assistant")
+                .receiverId("user-1")
+                .content("Latest")
+                .timestamp(Instant.parse("2026-06-08T10:01:00Z"))
+                .build();
+        ChatMessage oldest = ChatMessage.builder()
+                .id("message-1")
+                .senderId("user-1")
+                .receiverId("h-smart-assistant")
+                .content("Oldest")
+                .timestamp(Instant.parse("2026-06-08T10:00:00Z"))
+                .build();
+        when(chatMessageRepository.findAssistantConversationHistory(
+                eq("user-1"),
+                eq("h-smart-assistant"),
+                any(Pageable.class)
+        )).thenReturn(List.of(latest, oldest));
+
+        List<ChatMessageResponseDTO> history = assistantService.getHistory(" user-1 ", 30);
+
+        assertEquals(List.of("message-1", "message-2"), history.stream()
+                .map(ChatMessageResponseDTO::getId)
+                .toList());
+    }
+
+    @Test
+    void clearHistoryShouldDeleteOnlyCurrentUserAssistantConversation() {
+        AssistantServiceImpl assistantService = newAssistantService();
+        when(chatMessageRepository.deleteAssistantConversation("user-1", "h-smart-assistant"))
+                .thenReturn(4L);
+
+        assistantService.clearHistory(" user-1 ");
+
+        verify(chatMessageRepository).deleteAssistantConversation("user-1", "h-smart-assistant");
     }
 
     @Test

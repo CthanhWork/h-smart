@@ -19,6 +19,14 @@ Current scope:
 - policy-aware assistant context through fuzzy Elasticsearch lookup on `hsmart-policy-index`
 - request identity handling through `X-User-Id` forwarded by `api-gateway`
 
+Assistant conversation API:
+
+- `POST /api/v1/assistant/chat` sends a user message to the context-aware AI assistant
+- `GET /api/v1/assistant/history?limit=30` returns the current user's assistant messages in chronological order
+- `DELETE /api/v1/assistant/history` clears only the current user's assistant conversation
+- assistant history is stored in MongoDB and remains isolated by authenticated user ID
+- history reads and deletes bypass the AI generation circuit breaker and generation rate limiter
+
 ## Runtime and Stack
 
 - Framework: Spring Boot 3

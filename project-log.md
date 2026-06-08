@@ -2236,3 +2236,26 @@
 - Added an idempotent Product Service startup initializer for all 53 English Detectron2 category labels.
 - Fresh product databases can now support Smart Upload and AI moderation category matching without manual category creation.
 - Updated service notes for API Gateway and Product Service.
+
+[2026-06-08] production account lifecycle and complete AI conversation API added
+
+- Added email verification for new `user-service` registrations.
+- New accounts no longer receive a JWT until their email address is verified.
+- Added public account lifecycle endpoints:
+  - `POST /api/v1/auth/verify-email`
+  - `POST /api/v1/auth/resend-verification`
+  - `POST /api/v1/auth/forgot-password`
+  - `POST /api/v1/auth/reset-password`
+- Verification and password reset tokens:
+  - are generated with a cryptographically secure random generator
+  - are stored only as SHA-256 hashes
+  - are single-use and expire automatically
+  - are cleaned from PostgreSQL by a scheduled job
+- Added SMTP delivery with explicit `503 Service Unavailable` handling.
+- Added `emailVerified` to user profile responses while preserving existing users as verified.
+- Added production SMTP and frontend URL variables to `docker-compose-gcp.yml`.
+- Extended the existing context-aware AI assistant with:
+  - `GET /api/v1/assistant/history`
+  - `DELETE /api/v1/assistant/history`
+- Split the API Gateway assistant history route from AI generation so MongoDB history operations do not use the AI circuit breaker or generation quota.
+- Added unit coverage for token hashing, expiration, password reset, verification-gated login, and assistant history isolation.

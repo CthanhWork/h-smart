@@ -30,6 +30,7 @@ import com.hsmart.backend.infrastructure.exception.InvalidCredentialsException;
 import com.hsmart.backend.infrastructure.exception.ResourceNotFoundException;
 import com.hsmart.backend.infrastructure.persistence.UserRepository;
 import com.hsmart.backend.service.AuthService;
+import com.hsmart.backend.service.AccountLifecycleService;
 import com.hsmart.backend.service.UserService;
 import com.hsmart.backend.service.impl.AuthServiceImpl;
 import java.math.BigDecimal;
@@ -60,12 +61,15 @@ class UserServiceStatusCodeTest {
     @MockBean
     private UserService userService;
 
+    @MockBean
+    private AccountLifecycleService accountLifecycleService;
+
     @Test
     void registerShouldReturn201WhenPayloadIsValid() throws Exception {
         RegisterRequestDTO request = RegisterRequestDTO.builder()
                 .username("nguyenvana")
                 .email("vana@example.com")
-                .password("123456")
+                .password("12345678")
                 .fullName("Nguyen Van A")
                 .build();
 
@@ -76,7 +80,8 @@ class UserServiceStatusCodeTest {
                         .content(objectMapper.writeValueAsString(request)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.status").value(201))
-                .andExpect(jsonPath("$.message").value("User registered successfully"))
+                .andExpect(jsonPath("$.message").value(
+                        "User registered successfully. Check your email to verify the account."))
                 .andExpect(jsonPath("$.data.accessToken").value("mock-token"));
     }
 
@@ -100,7 +105,7 @@ class UserServiceStatusCodeTest {
         RegisterRequestDTO request = RegisterRequestDTO.builder()
                 .username("nguyenvana")
                 .email("vana@example.com")
-                .password("123456")
+                .password("12345678")
                 .build();
 
         given(authService.register(any(RegisterRequestDTO.class)))
@@ -175,7 +180,14 @@ class UserServiceStatusCodeTest {
         JwtService jwtService = mock(JwtService.class);
         com.hsmart.backend.application.mapper.UserMapper userMapper =
                 mock(com.hsmart.backend.application.mapper.UserMapper.class);
-        AuthServiceImpl service = new AuthServiceImpl(userRepository, passwordEncoder, jwtService, userMapper);
+        AccountLifecycleService accountLifecycleService = mock(AccountLifecycleService.class);
+        AuthServiceImpl service = new AuthServiceImpl(
+                userRepository,
+                passwordEncoder,
+                jwtService,
+                userMapper,
+                accountLifecycleService
+        );
         User bannedUser = User.builder()
                 .username("nguyenvana")
                 .email("vana@example.com")

@@ -13,4 +13,7 @@ public interface ChatMessageRepository extends MongoRepository<ChatMessage, Stri
 
     @Query(value = "{ '$or': [ { 'senderId': ?0, 'receiverId': ?1 }, { 'senderId': ?1, 'receiverId': ?0 } ] }", sort = "{ 'timestamp': -1 }")
     List<ChatMessage> findAssistantConversationHistory(String userId, String assistantId, Pageable pageable);
+
+    @Query(value = "{ '$or': [ { 'senderId': ?0, 'receiverId': ?1 }, { 'senderId': ?1, 'receiverId': ?0 } ] }", delete = true)
+    long deleteAssistantConversation(String userId, String assistantId);
 }

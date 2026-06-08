@@ -222,6 +222,18 @@ AI_PROVIDER_URL=https://generativelanguage.googleapis.com/v1beta/openai
 AI_PROVIDER_API_KEY=<AI_PROVIDER_API_KEY>
 AI_PROVIDER_MODEL=<AI_PROVIDER_MODEL>
 
+MAIL_ENABLED=true
+MAIL_HOST=smtp.gmail.com
+MAIL_PORT=587
+MAIL_USERNAME=<SMTP_ACCOUNT_EMAIL>
+MAIL_PASSWORD=<SMTP_APP_PASSWORD>
+MAIL_SMTP_AUTH=true
+MAIL_STARTTLS_ENABLE=true
+MAIL_FROM=<SMTP_ACCOUNT_EMAIL>
+FRONTEND_BASE_URL=https://<FRONTEND_DOMAIN>
+EMAIL_VERIFICATION_TOKEN_MINUTES=1440
+PASSWORD_RESET_TOKEN_MINUTES=30
+
 GHTK_API_URL=https://services.giaohangtietkiem.vn
 GHTK_API_TOKEN=
 GHTK_CLIENT_SOURCE=
@@ -236,6 +248,10 @@ openssl rand -hex 32
 ```
 
 Do not commit `.env`.
+
+For Gmail SMTP, enable two-step verification and create a Google App Password. Do not use the normal Google account password. `FRONTEND_BASE_URL` must point to the deployed frontend that handles `/verify-email` and `/reset-password`.
+
+The GCP Compose file requires SMTP credentials because newly registered accounts cannot log in until their email address is verified.
 
 ## 8. Validate the Deployment Configuration
 

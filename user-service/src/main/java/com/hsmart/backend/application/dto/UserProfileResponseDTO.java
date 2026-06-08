@@ -27,4 +27,5 @@ public class UserProfileResponseDTO {
     private String avatarUrl;
     private BigDecimal trustScore;
     private Long reviewCount;
+    private boolean emailVerified;
 }

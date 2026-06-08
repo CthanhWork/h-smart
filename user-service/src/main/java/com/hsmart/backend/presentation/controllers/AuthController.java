@@ -4,6 +4,10 @@ import com.hsmart.backend.application.dto.ApiResponse;
 import com.hsmart.backend.application.dto.AuthResponseDTO;
 import com.hsmart.backend.application.dto.LoginRequestDTO;
 import com.hsmart.backend.application.dto.RegisterRequestDTO;
+import com.hsmart.backend.application.dto.EmailRequestDTO;
+import com.hsmart.backend.application.dto.ResetPasswordRequestDTO;
+import com.hsmart.backend.application.dto.TokenRequestDTO;
+import com.hsmart.backend.service.AccountLifecycleService;
 import com.hsmart.backend.service.AuthService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.responses.ApiResponses;
@@ -22,6 +26,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class AuthController {
 
     private final AuthService authService;
+    private final AccountLifecycleService accountLifecycleService;
 
     @PostMapping("/register")
     @Operation(summary = "Register a new user")
@@ -32,7 +37,11 @@ public class AuthController {
     public ResponseEntity<ApiResponse<AuthResponseDTO>> register(@Valid @RequestBody RegisterRequestDTO request) {
         AuthResponseDTO response = authService.register(request);
         return ResponseEntity.status(HttpStatus.CREATED)
-                .body(ApiResponse.success(HttpStatus.CREATED, "User registered successfully", response));
+                .body(ApiResponse.success(
+                        HttpStatus.CREATED,
+                        "User registered successfully. Check your email to verify the account.",
+                        response
+                ));
     }
 
     @PostMapping("/login")
@@ -44,5 +53,37 @@ public class AuthController {
     public ResponseEntity<ApiResponse<AuthResponseDTO>> login(@Valid @RequestBody LoginRequestDTO request) {
         AuthResponseDTO response = authService.login(request);
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Login successful", response));
+    }
+
+    @PostMapping("/verify-email")
+    public ResponseEntity<ApiResponse<Void>> verifyEmail(@Valid @RequestBody TokenRequestDTO request) {
+        accountLifecycleService.verifyEmail(request.token());
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Email verified successfully", null));
+    }
+
+    @PostMapping("/resend-verification")
+    public ResponseEntity<ApiResponse<Void>> resendVerification(@Valid @RequestBody EmailRequestDTO request) {
+        accountLifecycleService.sendVerificationEmail(request.email());
+        return ResponseEntity.ok(ApiResponse.success(
+                HttpStatus.OK,
+                "If the account exists and is not verified, a verification email has been sent.",
+                null
+        ));
+    }
+
+    @PostMapping("/forgot-password")
+    public ResponseEntity<ApiResponse<Void>> forgotPassword(@Valid @RequestBody EmailRequestDTO request) {
+        accountLifecycleService.requestPasswordReset(request.email());
+        return ResponseEntity.ok(ApiResponse.success(
+                HttpStatus.OK,
+                "If the account exists, a password reset email has been sent.",
+                null
+        ));
+    }
+
+    @PostMapping("/reset-password")
+    public ResponseEntity<ApiResponse<Void>> resetPassword(@Valid @RequestBody ResetPasswordRequestDTO request) {
+        accountLifecycleService.resetPassword(request.token(), request.newPassword());
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Password reset successfully", null));
     }
 }

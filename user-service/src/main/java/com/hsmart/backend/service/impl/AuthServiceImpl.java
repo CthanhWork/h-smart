@@ -9,9 +9,11 @@ import com.hsmart.backend.domain.entities.User;
 import com.hsmart.backend.infrastructure.config.JwtService;
 import com.hsmart.backend.infrastructure.exception.DuplicateResourceException;
 import com.hsmart.backend.infrastructure.exception.AccountBannedException;
+import com.hsmart.backend.infrastructure.exception.AccountNotVerifiedException;
 import com.hsmart.backend.infrastructure.exception.InvalidCredentialsException;
 import com.hsmart.backend.infrastructure.persistence.UserRepository;
 import com.hsmart.backend.service.AuthService;
+import com.hsmart.backend.service.AccountLifecycleService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -26,21 +28,26 @@ public class AuthServiceImpl implements AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final UserMapper userMapper;
+    private final AccountLifecycleService accountLifecycleService;
 
     @Override
     public AuthResponseDTO register(RegisterRequestDTO request) {
-        if (userRepository.existsByUsername(request.getUsername())) {
+        String username = request.getUsername().trim();
+        String email = request.getEmail().trim().toLowerCase();
+
+        if (userRepository.existsByUsername(username)) {
             throw new DuplicateResourceException("Username already exists");
         }
-        if (userRepository.existsByEmail(request.getEmail())) {
+        if (userRepository.existsByEmail(email)) {
             throw new DuplicateResourceException("Email already exists");
         }
 
         User savedUser = userRepository.save(User.builder()
-                .username(request.getUsername().trim())
-                .email(request.getEmail().trim().toLowerCase())
+                .username(username)
+                .email(email)
                 .password(passwordEncoder.encode(request.getPassword()))
                 .role(Role.USER)
+                .emailVerified(false)
                 .fullName(request.getFullName())
                 .phoneNumber(request.getPhoneNumber())
                 .province(request.getProvince())
@@ -50,13 +57,15 @@ public class AuthServiceImpl implements AuthService {
                 .avatarUrl(request.getAvatarUrl())
                 .build());
 
-        return userMapper.toAuthResponse(savedUser, jwtService.generateToken(savedUser));
+        accountLifecycleService.sendVerificationEmail(savedUser.getEmail());
+        return userMapper.toAuthResponse(savedUser, null);
     }
 
     @Override
     @Transactional(readOnly = true)
     public AuthResponseDTO login(LoginRequestDTO request) {
-        User user = userRepository.findByUsernameOrEmail(request.getUsernameOrEmail(), request.getUsernameOrEmail())
+        String identifier = request.getUsernameOrEmail().trim();
+        User user = userRepository.findByUsernameOrEmail(identifier, identifier.toLowerCase())
                 .orElseThrow(() -> new InvalidCredentialsException("Invalid username/email or password"));
 
         if (!user.isActive()) {
@@ -65,6 +74,10 @@ public class AuthServiceImpl implements AuthService {
 
         if (!passwordEncoder.matches(request.getPassword(), user.getPassword())) {
             throw new InvalidCredentialsException("Invalid username/email or password");
+        }
+
+        if (!user.isEmailVerified()) {
+            throw new AccountNotVerifiedException();
         }
 
         return userMapper.toAuthResponse(user, jwtService.generateToken(user));

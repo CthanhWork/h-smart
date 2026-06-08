@@ -21,6 +21,10 @@ public interface UserMapper {
     @Mapping(target = "password", ignore = true)
     @Mapping(target = "email", ignore = true)
     @Mapping(target = "role", ignore = true)
+    @Mapping(target = "trustScore", ignore = true)
+    @Mapping(target = "reviewCount", ignore = true)
+    @Mapping(target = "active", ignore = true)
+    @Mapping(target = "emailVerified", ignore = true)
     void updateProfile(UpdateProfileRequestDTO request, @MappingTarget User user);
 
     default AuthResponseDTO toAuthResponse(User user, String accessToken) {

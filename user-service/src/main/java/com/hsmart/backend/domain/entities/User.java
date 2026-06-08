@@ -73,6 +73,10 @@ public class User {
     @Column(name = "is_active", nullable = false, columnDefinition = "boolean default true")
     private boolean active = true;
 
+    @Builder.Default
+    @Column(name = "email_verified", nullable = false, columnDefinition = "boolean default true")
+    private boolean emailVerified = true;
+
     @PrePersist
     public void applyDefaults() {
         if (role == null) {

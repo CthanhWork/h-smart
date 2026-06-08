@@ -27,8 +27,8 @@ public class RegisterRequestDTO {
     private String email;
 
     @NotBlank
-    @Size(min = 6, max = 100)
-    @Schema(example = "123456")
+    @Size(min = 8, max = 100)
+    @Schema(example = "StrongPassword123!")
     private String password;
 
     @Schema(example = "Nguyen Van A")

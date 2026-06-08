@@ -82,7 +82,12 @@ spring:
           uri: lb://interaction-service
           predicates:
             - Path=/api/v1/interactions/**
-        - id: assistant-route
+        - id: assistant-history-route
+          uri: lb://interaction-service
+          predicates:
+            - Path=/api/v1/assistant/history
+            - Method=GET,DELETE
+        - id: assistant-generation-route
           uri: lb://interaction-service
           predicates:
             - Path=/api/v1/assistant/**

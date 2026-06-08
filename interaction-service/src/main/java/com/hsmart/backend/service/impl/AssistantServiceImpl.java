@@ -3,6 +3,7 @@ package com.hsmart.backend.service.impl;
 import com.hsmart.backend.application.dto.AssistantChatMessage;
 import com.hsmart.backend.application.dto.AssistantPromptContext;
 import com.hsmart.backend.application.dto.AssistantProductContext;
+import com.hsmart.backend.application.dto.ChatMessageResponseDTO;
 import com.hsmart.backend.application.dto.IntentClassification;
 import com.hsmart.backend.application.dto.IntentClassification.Intent;
 import com.hsmart.backend.application.dto.OrderSummary;
@@ -109,6 +110,40 @@ public class AssistantServiceImpl implements AssistantService {
         log.info("Completed assistant chat request for user {} with traceId {} in {} ms. AI response time was {} ms",
                 normalizedUserId, traceId, elapsedMillis(startedAt), aiDurationMs);
         return assistantReply;
+    }
+
+    @Override
+    public List<ChatMessageResponseDTO> getHistory(String userId, int limit) {
+        if (!StringUtils.hasText(userId)) {
+            throw new InvalidInteractionRequestException("userId is required");
+        }
+
+        String normalizedUserId = userId.trim();
+        int normalizedLimit = Math.min(50, Math.max(1, limit));
+        List<ChatMessage> history = new ArrayList<>(chatMessageRepository.findAssistantConversationHistory(
+                normalizedUserId,
+                assistantProperties.assistantId(),
+                PageRequest.of(0, normalizedLimit)
+        ));
+        Collections.reverse(history);
+
+        return history.stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Override
+    public void clearHistory(String userId) {
+        if (!StringUtils.hasText(userId)) {
+            throw new InvalidInteractionRequestException("userId is required");
+        }
+
+        String normalizedUserId = userId.trim();
+        long deletedCount = chatMessageRepository.deleteAssistantConversation(
+                normalizedUserId,
+                assistantProperties.assistantId()
+        );
+        log.info("Cleared {} assistant history messages for user {}", deletedCount, normalizedUserId);
     }
 
     @Override
@@ -337,6 +372,17 @@ public class AssistantServiceImpl implements AssistantService {
 
         chatMessageRepository.saveAll(List.of(question, answer));
         log.info("Stored assistant conversation turn for user {}", userId);
+    }
+
+    private ChatMessageResponseDTO toResponse(ChatMessage message) {
+        return ChatMessageResponseDTO.builder()
+                .id(message.getId())
+                .senderId(message.getSenderId())
+                .receiverId(message.getReceiverId())
+                .productId(message.getProductId())
+                .content(message.getContent())
+                .timestamp(message.getTimestamp())
+                .build();
     }
 
     private int resolveHistoryLimit() {
