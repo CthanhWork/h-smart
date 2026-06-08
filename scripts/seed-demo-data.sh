@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+COMPOSE_FILE="${COMPOSE_FILE:-docker-compose-gcp.yml}"
+API_BASE_URL="${API_BASE_URL:-http://localhost:8000/api/v1}"
+DEMO_PASSWORD="${DEMO_PASSWORD:-Demo123@@}"
+POSTGRES_USER="${POSTGRES_USER:-hsmart}"
+USER_DB_NAME="${USER_DB_NAME:-hsmart_user_db}"
+
+SELLER_USERNAME="${SELLER_USERNAME:-demo_seller}"
+BUYER_USERNAME="${BUYER_USERNAME:-demo_buyer}"
+ADMIN_USERNAME="${ADMIN_USERNAME:-demo_admin}"
+
+SELLER_EMAIL="${SELLER_EMAIL:-demo-seller@hsmart.local}"
+BUYER_EMAIL="${BUYER_EMAIL:-demo-buyer@hsmart.local}"
+ADMIN_EMAIL="${ADMIN_EMAIL:-demo-admin@hsmart.local}"
+
+require_command() {
+  if ! command -v "$1" >/dev/null 2>&1; then
+    echo "Missing required command: $1" >&2
+    exit 1
+  fi
+}
+
+json_get() {
+  python3 - "$1" "$2" <<'PY'
+import json
+import sys
+
+raw = sys.argv[1]
+path = sys.argv[2].split(".")
+data = json.loads(raw)
+for key in path:
+    if key.isdigit():
+        data = data[int(key)]
+    else:
+        data = data.get(key)
+    if data is None:
+        print("")
+        sys.exit(0)
+print(data)
+PY
+}
+
+api_json() {
+  local method="$1"
+  local path="$2"
+  local body="$3"
+  local token="${4:-}"
+  local headers=(-H "Content-Type: application/json")
+  if [[ -n "$token" ]]; then
+    headers+=(-H "Authorization: Bearer $token")
+  fi
+
+  curl -fsS -X "$method" "${API_BASE_URL}${path}" "${headers[@]}" -d "$body"
+}
+
+register_user() {
+  local username="$1"
+  local email="$2"
+  local full_name="$3"
+  local payload response http_status response_body
+  payload=$(python3 - "$username" "$email" "$DEMO_PASSWORD" "$full_name" <<'PY'
+import json
+import sys
+
+print(json.dumps({
+    "username": sys.argv[1],
+    "email": sys.argv[2],
+    "password": sys.argv[3],
+    "fullName": sys.argv[4],
+}))
+PY
+)
+
+  echo "Registering ${username}..."
+  response=$(curl -sS -X POST "${API_BASE_URL}/auth/register" \
+    -H "Content-Type: application/json" \
+    -d "$payload" \
+    -w $'\n%{http_code}')
+  http_status=$(tail -n 1 <<<"$response")
+  response_body=$(sed '$d' <<<"$response")
+
+  if [[ "$http_status" != "201" ]]; then
+    if grep -qi "already exists" <<<"$response_body"; then
+      echo "Account ${username} already exists. Continuing."
+      return
+    fi
+    echo "Failed to register ${username}. Check SMTP configuration or existing account state." >&2
+    echo "$response_body" >&2
+    exit 1
+  fi
+}
+
+verify_and_promote_accounts() {
+  echo "Verifying demo accounts and promoting admin..."
+  docker compose -f "$COMPOSE_FILE" exec -T user-postgres-db \
+    psql -U "$POSTGRES_USER" -d "$USER_DB_NAME" <<SQL
+UPDATE users
+SET email_verified = true,
+    is_active = true,
+    trust_score = CASE WHEN username = '${SELLER_USERNAME}' THEN 4.80 ELSE trust_score END,
+    review_count = CASE WHEN username = '${SELLER_USERNAME}' THEN 9 ELSE review_count END
+WHERE username IN ('${SELLER_USERNAME}', '${BUYER_USERNAME}', '${ADMIN_USERNAME}');
+
+UPDATE users
+SET role = 'ADMIN',
+    email_verified = true,
+    is_active = true
+WHERE username = '${ADMIN_USERNAME}';
+SQL
+}
+
+login_user() {
+  local username="$1"
+  local payload response token
+  payload=$(python3 - "$username" "$DEMO_PASSWORD" <<'PY'
+import json
+import sys
+
+print(json.dumps({
+    "usernameOrEmail": sys.argv[1],
+    "password": sys.argv[2],
+}))
+PY
+)
+  response=$(api_json POST "/auth/login" "$payload")
+  token=$(json_get "$response" "data.accessToken")
+  if [[ -z "$token" ]]; then
+    echo "Login failed for ${username}" >&2
+    echo "$response" >&2
+    exit 1
+  fi
+  echo "$token"
+}
+
+first_category_id() {
+  local response category_id
+  response=$(curl -fsS "${API_BASE_URL}/products/categories")
+  category_id=$(json_get "$response" "data.0.id")
+  if [[ -z "$category_id" ]]; then
+    echo "No product categories found. Start product-service and let the category initializer run." >&2
+    exit 1
+  fi
+  echo "$category_id"
+}
+
+create_demo_image() {
+  local image_path="$1"
+  base64 -d >"$image_path" <<'BASE64'
+iVBORw0KGgoAAAANSUhEUgAAAQAAAAEACAIAAADTED8xAAAAA3NCSVQICAjb4U/gAAABKElEQVR4nO3UQQ0AIBDAMMC/5+ONAvZoFSzZnpld0D1w2wMAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAD8G2gAAeP3qV0AAAAASUVORK5CYII=
+BASE64
+}
+
+create_product() {
+  local token="$1"
+  local category_id="$2"
+  local title="$3"
+  local price="$4"
+  local image_path="$5"
+  local response product_id
+
+  response=$(curl -fsS -X POST "${API_BASE_URL}/products" \
+    -H "Authorization: Bearer ${token}" \
+    -F "file=@${image_path};type=image/png" \
+    -F "title=${title}" \
+    -F "categoryId=${category_id}" \
+    -F "price=${price}" \
+    -F "description=Demo listing generated by the H-Smart seed script.")
+
+  product_id=$(json_get "$response" "data.id")
+  if [[ -z "$product_id" ]]; then
+    echo "Product creation failed" >&2
+    echo "$response" >&2
+    exit 1
+  fi
+  echo "$product_id"
+}
+
+approve_product() {
+  local admin_token="$1"
+  local product_id="$2"
+  api_json POST "/admin/products/${product_id}/moderate" '{"action":"APPROVE"}' "$admin_token" >/dev/null
+}
+
+create_order() {
+  local buyer_token="$1"
+  local product_id="$2"
+  local response order_id
+  response=$(api_json POST "/orders" "{\"productId\":${product_id}}" "$buyer_token")
+  order_id=$(json_get "$response" "data.id")
+  if [[ -z "$order_id" ]]; then
+    echo "Order creation failed" >&2
+    echo "$response" >&2
+    exit 1
+  fi
+  echo "$order_id"
+}
+
+main() {
+  require_command curl
+  require_command docker
+  require_command python3
+  require_command base64
+
+  if [[ -f .env ]]; then
+    set -a
+    # shellcheck disable=SC1091
+    source .env
+    set +a
+  fi
+
+  register_user "$SELLER_USERNAME" "$SELLER_EMAIL" "Demo Seller"
+  register_user "$BUYER_USERNAME" "$BUYER_EMAIL" "Demo Buyer"
+  register_user "$ADMIN_USERNAME" "$ADMIN_EMAIL" "Demo Admin"
+  verify_and_promote_accounts
+
+  echo "Logging in demo users..."
+  local seller_token buyer_token admin_token category_id image_path product_a product_b order_id
+  seller_token=$(login_user "$SELLER_USERNAME")
+  buyer_token=$(login_user "$BUYER_USERNAME")
+  admin_token=$(login_user "$ADMIN_USERNAME")
+  category_id=$(first_category_id)
+
+  image_path="$(mktemp /tmp/hsmart-demo-product.XXXXXX.png)"
+  create_demo_image "$image_path"
+
+  echo "Creating and approving demo products..."
+  product_a=$(create_product "$seller_token" "$category_id" "Demo air purifier" "1250000" "$image_path")
+  approve_product "$admin_token" "$product_a"
+  product_b=$(create_product "$seller_token" "$category_id" "Demo compact washing machine" "3200000" "$image_path")
+  approve_product "$admin_token" "$product_b"
+
+  echo "Creating demo order..."
+  order_id=$(create_order "$buyer_token" "$product_a")
+
+  rm -f "$image_path"
+
+  cat <<EOF
+
+Demo data seed completed.
+
+Accounts:
+- Seller: ${SELLER_USERNAME} / ${DEMO_PASSWORD}
+- Buyer:  ${BUYER_USERNAME} / ${DEMO_PASSWORD}
+- Admin:  ${ADMIN_USERNAME} / ${DEMO_PASSWORD}
+
+Created products:
+- Product ${product_a}
+- Product ${product_b}
+
+Created order:
+- Order ${order_id}
+
+Open UI:
+- API Gateway: ${API_BASE_URL%/api/v1}
+EOF
+}
+
+main "$@"
