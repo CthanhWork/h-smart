@@ -2225,3 +2225,14 @@
   - the required `vm.max_map_count` kernel setting
   - private Elasticsearch health verification
   - Elasticsearch log inspection and backup coverage
+
+[2026-06-08] real frontend integration contracts completed
+
+- Updated API Gateway authentication rules:
+  - product list reads are public
+  - numeric product detail reads are public
+  - wishlist, internal product paths, and all product mutations remain protected
+- Added Gateway regression coverage for public product reads and protected product subpaths.
+- Added an idempotent Product Service startup initializer for all 53 English Detectron2 category labels.
+- Fresh product databases can now support Smart Upload and AI moderation category matching without manual category creation.
+- Updated service notes for API Gateway and Product Service.

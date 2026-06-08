@@ -31,6 +31,7 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
     private static final String ADMIN_REQUIRED_MESSAGE = "Admin role is required";
     private static final String WEBSOCKET_PATH_PREFIX = "/api/v1/interactions/ws";
     private static final String ADMIN_PATH_PREFIX = "/api/v1/admin/";
+    private static final String PRODUCTS_PATH = "/api/v1/products";
     private static final String PRODUCT_CATEGORIES_PATH = "/api/v1/products/categories";
     private static final List<String> PUBLIC_PATHS = List.of(
             "/api/v1/auth/**",
@@ -112,7 +113,21 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
 
         return PUBLIC_PATHS.stream().anyMatch(pattern -> pathMatcher.match(pattern, path))
                 || (HttpMethod.GET.equals(exchange.getRequest().getMethod())
-                && PUBLIC_GET_PATHS.stream().anyMatch(pattern -> pathMatcher.match(pattern, path)));
+                && (PUBLIC_GET_PATHS.stream().anyMatch(pattern -> pathMatcher.match(pattern, path))
+                || isPublicProductRead(path)));
+    }
+
+    private boolean isPublicProductRead(String path) {
+        if (PRODUCTS_PATH.equals(path)) {
+            return true;
+        }
+
+        if (!path.startsWith(PRODUCTS_PATH + "/")) {
+            return false;
+        }
+
+        String productId = path.substring((PRODUCTS_PATH + "/").length());
+        return !productId.isBlank() && productId.chars().allMatch(Character::isDigit);
     }
 
     private String resolveAuthorizationHeader(ServerWebExchange exchange, String path) {

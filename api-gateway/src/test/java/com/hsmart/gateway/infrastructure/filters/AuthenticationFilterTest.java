@@ -144,6 +144,63 @@ class AuthenticationFilterTest {
     }
 
     @Test
+    void shouldBypassAuthenticationForProductListRead() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/products?page=0&size=20").build()
+        );
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertTrue(chainCalled.get());
+        verifyNoInteractions(jwtService);
+    }
+
+    @Test
+    void shouldBypassAuthenticationForProductDetailRead() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/products/42").build()
+        );
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertTrue(chainCalled.get());
+        verifyNoInteractions(jwtService);
+    }
+
+    @Test
+    void shouldRequireAuthenticationForNonNumericProductSubpath() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/products/internal/stats").build()
+        );
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertFalse(chainCalled.get());
+        assertEquals(401, exchange.getResponse().getStatusCode().value());
+    }
+
+    @Test
     void shouldBypassAuthenticationForCategoryReadPath() {
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/v1/products/categories").build()
