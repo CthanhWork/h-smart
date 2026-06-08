@@ -46,6 +46,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -171,7 +172,8 @@ public class ProductServiceImpl implements ProductService {
             Long categoryId,
             Pageable pageable
     ) {
-        Page<ProductResponseDTO> page = productRepository.searchProducts(normalizeKeyword(keyword), status, categoryId, pageable)
+        Page<ProductResponseDTO> page = productRepository
+                .findAll(buildProductSpecification(normalizeKeyword(keyword), status, categoryId), pageable)
                 .map(this::toProductResponse);
         return PageResponseDTO.from(page);
     }
@@ -275,6 +277,42 @@ public class ProductServiceImpl implements ProductService {
         return keyword.trim();
     }
 
+    private Specification<Product> buildProductSpecification(
+            String keyword,
+            ProductStatus status,
+            Long categoryId
+    ) {
+        Specification<Product> specification =
+                (root, query, criteriaBuilder) -> criteriaBuilder.isFalse(root.get("isDeleted"));
+
+        if (status != null) {
+            specification = specification.and(
+                    (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("status"), status)
+            );
+        }
+
+        if (categoryId != null) {
+            specification = specification.and(
+                    (root, query, criteriaBuilder) ->
+                            criteriaBuilder.equal(root.join("category").get("id"), categoryId)
+            );
+        }
+
+        if (keyword != null) {
+            String pattern = "%" + keyword.toLowerCase(java.util.Locale.ROOT) + "%";
+            specification = specification.and((root, query, criteriaBuilder) -> {
+                var category = root.join("category", jakarta.persistence.criteria.JoinType.LEFT);
+                return criteriaBuilder.or(
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("title")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(root.get("description")), pattern),
+                        criteriaBuilder.like(criteriaBuilder.lower(category.get("name")), pattern)
+                );
+            });
+        }
+
+        return specification;
+    }
+
     private Product getActiveProduct(Long id) {
         return productRepository.findByIdAndIsDeletedFalse(id)
                 .orElseThrow(() -> new ProductNotFoundException(id));
@@ -359,7 +397,7 @@ public class ProductServiceImpl implements ProductService {
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
                 .status(product.getStatus() != null ? product.getStatus().name() : null)
                 .sellerId(product.getSellerId())
-                .aiMetadata(parseAiMetadata(product.getAiMetadata()))
+                .aiMetadata(parseAiMetadata(product.getId(), product.getAiMetadata()))
                 .build();
     }
 
@@ -400,11 +438,11 @@ public class ProductServiceImpl implements ProductService {
     }
 
     private ProductResponseDTO toProductResponse(Product product) {
-        List<DetectionDTO> aiMetadata = parseAiMetadata(product.getAiMetadata());
+        List<DetectionDTO> aiMetadata = parseAiMetadata(product.getId(), product.getAiMetadata());
         return productMapper.toResponse(product, aiMetadata, applicationProperties.publicBaseUrl());
     }
 
-    private List<DetectionDTO> parseAiMetadata(String aiMetadataJson) {
+    private List<DetectionDTO> parseAiMetadata(Long productId, String aiMetadataJson) {
         if (!StringUtils.hasText(aiMetadataJson)) {
             return Collections.emptyList();
         }
@@ -413,7 +451,12 @@ public class ProductServiceImpl implements ProductService {
             return objectMapper.readValue(aiMetadataJson, new TypeReference<List<DetectionDTO>>() {
             });
         } catch (IOException exception) {
-            throw new FileProcessingException("Unable to parse stored AI metadata", exception);
+            log.warn(
+                    "Ignored invalid stored AI metadata for product {}. Manual review data will be returned without detections",
+                    productId,
+                    exception
+            );
+            return Collections.emptyList();
         }
     }
 }
