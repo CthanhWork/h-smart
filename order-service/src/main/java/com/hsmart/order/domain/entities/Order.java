@@ -48,6 +48,10 @@ public class Order {
     private String trackingCode;
 
     @Enumerated(EnumType.STRING)
+    @Column(name = "delivery_method", nullable = false, length = 30, columnDefinition = "varchar(30) default 'GHTK'")
+    private DeliveryMethod deliveryMethod;
+
+    @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private OrderStatus status;
 
@@ -67,6 +71,9 @@ public class Order {
         }
         if (shippingFee == null) {
             shippingFee = BigDecimal.ZERO;
+        }
+        if (deliveryMethod == null) {
+            deliveryMethod = DeliveryMethod.GHTK;
         }
     }
 

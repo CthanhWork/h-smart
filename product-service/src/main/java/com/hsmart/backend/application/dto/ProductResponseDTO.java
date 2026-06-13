@@ -23,6 +23,8 @@ public class ProductResponseDTO {
     private Long categoryId;
     private String categoryName;
     private String imageUrl;
+    @Builder.Default
+    private List<String> imageUrls = new ArrayList<>();
     private long likeCount;
 
     @Builder.Default

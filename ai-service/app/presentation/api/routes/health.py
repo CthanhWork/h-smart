@@ -18,4 +18,5 @@ def health_check(request: Request) -> dict:
         "model_path": str(settings.model_path),
         "architecture": "Detectron2 Mask R-CNN R-50-FPN",
         "score_threshold": settings.score_threshold,
+        "demo_mode": settings.demo_mode,
     }

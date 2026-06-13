@@ -38,6 +38,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.EnumSet;
 import java.util.List;
@@ -76,15 +77,22 @@ public class ProductServiceImpl implements ProductService {
     private final ProductEventPublisher productEventPublisher;
 
     @Override
-    public ProductResponseDTO createProduct(ProductRequestDTO request, MultipartFile image) throws IOException {
+    public ProductResponseDTO createProduct(
+            ProductRequestDTO request,
+            List<MultipartFile> images,
+            int analysisImageIndex
+    ) throws IOException {
         String sellerId = getCurrentUserId();
+        List<MultipartFile> normalizedImages = normalizeImages(images);
+        validateAnalysisImageIndex(normalizedImages, analysisImageIndex);
+        MultipartFile analysisImage = normalizedImages.get(analysisImageIndex);
 
         Category category = resolveCategory(request.getCategoryId());
         List<DetectionDTO> detections = Collections.emptyList();
         RuntimeException aiServiceFailure = null;
 
         try {
-            PredictResponseDTO predictResponse = visionService.detectObjects(image);
+            PredictResponseDTO predictResponse = visionService.detectObjects(analysisImage);
             if (predictResponse.getDetections() != null) {
                 detections = predictResponse.getDetections();
             }
@@ -93,14 +101,14 @@ public class ProductServiceImpl implements ProductService {
         }
 
         String aiMetadataJson = objectMapper.writeValueAsString(detections);
-        String relativeImageUrl = saveUploadedFile(image);
+        List<String> relativeImageUrls = saveUploadedFiles(normalizedImages);
+        String relativeImageUrl = relativeImageUrls.get(0);
+        String imageUrlsJson = objectMapper.writeValueAsString(relativeImageUrls);
         String resolvedTitle = aiServiceFailure != null && !StringUtils.hasText(request.getTitle())
                 ? FALLBACK_PRODUCT_TITLE
                 : productNamingSupport.resolveTitle(request.getTitle(), detections);
         validateClientManagedStatus(request.getStatus());
-        ProductStatus resolvedStatus = aiServiceFailure != null
-                ? ProductStatus.PENDING_REVIEW
-                : request.getStatus() != null ? request.getStatus() : ProductStatus.ACTIVE;
+        ProductStatus resolvedStatus = ProductStatus.PENDING_REVIEW;
 
         Product product = productMapper.toEntity(
                 request.getDescription(),
@@ -110,6 +118,7 @@ public class ProductServiceImpl implements ProductService {
                 category,
                 resolvedTitle,
                 relativeImageUrl,
+                imageUrlsJson,
                 aiMetadataJson
         );
 
@@ -141,7 +150,6 @@ public class ProductServiceImpl implements ProductService {
         product.setTitle(resolveUpdatedTitle(product, request));
         product.setDescription(request.getDescription());
         product.setPrice(request.getPrice());
-        product.setStatus(request.getStatus() != null ? request.getStatus() : product.getStatus());
         product.setCategory(category);
 
         Product savedProduct = productRepository.save(product);
@@ -241,7 +249,7 @@ public class ProductServiceImpl implements ProductService {
     @Transactional(readOnly = true)
     public ProductStatsResponseDTO getProductStats() {
         long totalSellingProducts = productRepository.countByIsDeletedFalseAndStatusIn(
-                EnumSet.of(ProductStatus.ACTIVE, ProductStatus.APPROVED)
+                EnumSet.of(ProductStatus.APPROVED)
         );
         return ProductStatsResponseDTO.builder()
                 .totalSellingProducts(totalSellingProducts)
@@ -346,10 +354,10 @@ public class ProductServiceImpl implements ProductService {
     }
 
     private void validateClientManagedStatus(ProductStatus status) {
-        if (status == ProductStatus.APPROVED || status == ProductStatus.PENDING_REVIEW) {
+        if (status != null) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
-                    "Moderation statuses can only be assigned by admin-service"
+                    "Product status can only be changed by admin-service or order-service workflows"
             );
         }
     }
@@ -410,6 +418,37 @@ public class ProductServiceImpl implements ProductService {
                 .orElseThrow(() -> new CategoryNotFoundException(categoryId));
     }
 
+    private List<MultipartFile> normalizeImages(List<MultipartFile> images) {
+        if (images == null || images.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "At least one image file is required");
+        }
+
+        List<MultipartFile> normalizedImages = images.stream()
+                .filter(file -> file != null && !file.isEmpty())
+                .toList();
+        if (normalizedImages.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "At least one image file is required");
+        }
+        return normalizedImages;
+    }
+
+    private void validateAnalysisImageIndex(List<MultipartFile> images, int analysisImageIndex) {
+        if (analysisImageIndex < 0 || analysisImageIndex >= images.size()) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "analysisImageIndex must reference one of the uploaded images"
+            );
+        }
+    }
+
+    private List<String> saveUploadedFiles(List<MultipartFile> files) {
+        List<String> relativeImageUrls = new ArrayList<>(files.size());
+        for (MultipartFile file : files) {
+            relativeImageUrls.add(saveUploadedFile(file));
+        }
+        return relativeImageUrls;
+    }
+
     private String saveUploadedFile(MultipartFile file) {
         String originalFilename = StringUtils.hasText(file.getOriginalFilename())
                 ? file.getOriginalFilename().trim()
@@ -439,7 +478,10 @@ public class ProductServiceImpl implements ProductService {
 
     private ProductResponseDTO toProductResponse(Product product) {
         List<DetectionDTO> aiMetadata = parseAiMetadata(product.getId(), product.getAiMetadata());
-        return productMapper.toResponse(product, aiMetadata, applicationProperties.publicBaseUrl());
+        List<String> imageUrls = parseImageUrls(product.getId(), product.getImageUrls());
+        ProductResponseDTO response = productMapper.toResponse(product, aiMetadata, applicationProperties.publicBaseUrl());
+        response.setImageUrls(toAbsoluteImageUrls(imageUrls, response.getImageUrl(), applicationProperties.publicBaseUrl()));
+        return response;
     }
 
     private List<DetectionDTO> parseAiMetadata(Long productId, String aiMetadataJson) {
@@ -458,5 +500,36 @@ public class ProductServiceImpl implements ProductService {
             );
             return Collections.emptyList();
         }
+    }
+
+    private List<String> parseImageUrls(Long productId, String imageUrlsJson) {
+        if (!StringUtils.hasText(imageUrlsJson)) {
+            return Collections.emptyList();
+        }
+
+        try {
+            return objectMapper.readValue(imageUrlsJson, new TypeReference<List<String>>() {
+            });
+        } catch (IOException exception) {
+            log.warn(
+                    "Ignored invalid stored image gallery metadata for product {}. Only the primary image will be returned",
+                    productId,
+                    exception
+            );
+            return Collections.emptyList();
+        }
+    }
+
+    private List<String> toAbsoluteImageUrls(List<String> imageUrls, String primaryImageUrl, String publicBaseUrl) {
+        List<String> relativeImageUrls = imageUrls == null ? Collections.emptyList() : imageUrls.stream()
+                .filter(StringUtils::hasText)
+                .toList();
+        if (relativeImageUrls.isEmpty() && StringUtils.hasText(primaryImageUrl)) {
+            return List.of(primaryImageUrl);
+        }
+
+        return relativeImageUrls.stream()
+                .map(imageUrl -> productMapper.toAbsoluteImageUrl(publicBaseUrl, imageUrl))
+                .toList();
     }
 }

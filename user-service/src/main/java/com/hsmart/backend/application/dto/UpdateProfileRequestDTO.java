@@ -18,14 +18,14 @@ public class UpdateProfileRequestDTO {
     @Schema(example = "0901234567")
     private String phoneNumber;
 
-    @Schema(example = "Ho Chi Minh City")
-    private String province;
+    @Schema(example = "79")
+    private String provinceCode;
 
-    @Schema(example = "Go Vap District")
-    private String district;
+    @Schema(example = "760")
+    private String districtCode;
 
-    @Schema(example = "Ward 1")
-    private String ward;
+    @Schema(example = "26734")
+    private String wardCode;
 
     @Schema(example = "12 Nguyen Van Nghi Street")
     private String streetDetail;

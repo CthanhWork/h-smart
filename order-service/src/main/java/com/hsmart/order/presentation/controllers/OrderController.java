@@ -8,6 +8,7 @@ import com.hsmart.order.application.dto.GhtkWebhookRequestDTO;
 import com.hsmart.order.application.exceptions.MissingUserContextException;
 import com.hsmart.order.service.OrderService;
 import jakarta.validation.Valid;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
@@ -41,6 +42,14 @@ public class OrderController {
                 .body(ApiResponse.success(HttpStatus.CREATED, "Order created successfully", response));
     }
 
+    @GetMapping
+    public ResponseEntity<ApiResponse<List<OrderResponseDTO>>> getMyOrders(
+            @RequestHeader(value = "X-User-Id", required = false) String currentUserId
+    ) {
+        List<OrderResponseDTO> response = orderService.getOrdersForCurrentUser(requireUserId(currentUserId));
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Orders fetched successfully", response));
+    }
+
     @PostMapping("/{id}/confirm")
     public ResponseEntity<ApiResponse<OrderResponseDTO>> confirmOrder(
             @PathVariable Long id,
@@ -59,9 +68,21 @@ public class OrderController {
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Order completed successfully", response));
     }
 
+    @PostMapping("/{id}/cancel")
+    public ResponseEntity<ApiResponse<OrderResponseDTO>> cancelOrder(
+            @PathVariable Long id,
+            @RequestHeader(value = "X-User-Id", required = false) String currentUserId
+    ) {
+        OrderResponseDTO response = orderService.cancelOrder(id, requireUserId(currentUserId));
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Order cancelled successfully", response));
+    }
+
     @GetMapping("/{id}")
-    public ResponseEntity<ApiResponse<OrderResponseDTO>> getOrder(@PathVariable Long id) {
-        OrderResponseDTO response = orderService.getOrder(id);
+    public ResponseEntity<ApiResponse<OrderResponseDTO>> getOrder(
+            @PathVariable Long id,
+            @RequestHeader(value = "X-User-Id", required = false) String currentUserId
+    ) {
+        OrderResponseDTO response = orderService.getOrder(id, requireUserId(currentUserId));
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Order fetched successfully", response));
     }
 

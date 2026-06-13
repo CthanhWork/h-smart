@@ -6,11 +6,12 @@ import com.hsmart.backend.application.dto.ProductRequestDTO;
 import com.hsmart.backend.application.dto.ProductResponseDTO;
 import com.hsmart.backend.domain.entities.ProductStatus;
 import java.io.IOException;
+import java.util.List;
 import org.springframework.data.domain.Pageable;
 import org.springframework.web.multipart.MultipartFile;
 
 public interface ProductService {
-    ProductResponseDTO createProduct(ProductRequestDTO request, MultipartFile image) throws IOException;
+    ProductResponseDTO createProduct(ProductRequestDTO request, List<MultipartFile> images, int analysisImageIndex) throws IOException;
     ProductResponseDTO updateProduct(Long id, ProductRequestDTO request);
     void deleteProduct(Long id);
     PageResponseDTO<ProductResponseDTO> getAllProducts(String keyword, ProductStatus status, Long categoryId, Pageable pageable);

@@ -21,6 +21,7 @@ public interface ProductMapper {
     @Mapping(target = "sellerId", source = "sellerId")
     @Mapping(target = "category", source = "category")
     @Mapping(target = "imageUrl", source = "relativeImageUrl")
+    @Mapping(target = "imageUrls", source = "imageUrlsJson")
     @Mapping(target = "aiMetadata", source = "aiMetadataJson")
     @Mapping(target = "likeCount", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
@@ -32,6 +33,7 @@ public interface ProductMapper {
             Category category,
             String resolvedTitle,
             String relativeImageUrl,
+            String imageUrlsJson,
             String aiMetadataJson
     );
 
@@ -41,6 +43,7 @@ public interface ProductMapper {
     @Mapping(target = "categoryId", source = "product.category.id")
     @Mapping(target = "categoryName", source = "product.category.name")
     @Mapping(target = "imageUrl", expression = "java(toAbsoluteImageUrl(publicBaseUrl, product.getImageUrl()))")
+    @Mapping(target = "imageUrls", ignore = true)
     @Mapping(target = "aiMetadata", ignore = true)
     @Mapping(target = "numDetections", ignore = true)
     ProductResponseDTO toResponse(Product product, String publicBaseUrl);

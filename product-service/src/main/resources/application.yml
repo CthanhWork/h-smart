@@ -43,7 +43,9 @@ services:
   ai:
     base-url: ${AI_SERVICE_BASE_URL:http://localhost:8002}
     connect-timeout-ms: ${AI_SERVICE_CONNECT_TIMEOUT_MS:2000}
-    read-timeout-ms: ${AI_SERVICE_READ_TIMEOUT_MS:5000}
+    read-timeout-ms: ${AI_SERVICE_READ_TIMEOUT_MS:60000}
+  interaction:
+    base-url: ${INTERACTION_SERVICE_BASE_URL:http://localhost:8083}
 pricing:
   average-refresh-cron: ${PRICING_AVERAGE_REFRESH_CRON:0 0 * * * *}
 storage:

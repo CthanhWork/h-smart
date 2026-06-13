@@ -1,5 +1,6 @@
 package com.hsmart.order.application.dto;
 
+import com.hsmart.order.domain.entities.DeliveryMethod;
 import com.hsmart.order.domain.entities.OrderStatus;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -20,6 +21,7 @@ public class OrderResponseDTO {
     private BigDecimal amount;
     private BigDecimal shippingFee;
     private String trackingCode;
+    private DeliveryMethod deliveryMethod;
     private OrderStatus status;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;

@@ -37,14 +37,14 @@ public class RegisterRequestDTO {
     @Schema(example = "0901234567")
     private String phoneNumber;
 
-    @Schema(example = "Ho Chi Minh City")
-    private String province;
+    @Schema(example = "79")
+    private String provinceCode;
 
-    @Schema(example = "Thu Duc City")
-    private String district;
+    @Schema(example = "760")
+    private String districtCode;
 
-    @Schema(example = "Linh Trung Ward")
-    private String ward;
+    @Schema(example = "26734")
+    private String wardCode;
 
     @Schema(example = "1 Vo Van Ngan Street")
     private String streetDetail;

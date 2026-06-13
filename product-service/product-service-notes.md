@@ -306,7 +306,7 @@ Internal stats endpoint:
 
 Returned data:
 
-- `totalSellingProducts`: count of non-deleted products with status `ACTIVE` or `APPROVED`
+- `totalSellingProducts`: count of non-deleted products with status `APPROVED`
 
 ## Product Create Smart Naming
 
@@ -453,11 +453,11 @@ Current behavior:
 Supported `GET /api/v1/products` query parameters:
 
 - `keyword`: searches product title, description, and category name
-- `status`: filters by product status such as `ACTIVE` or `SOLD`
+- `status`: filters by product status such as `APPROVED` or `SOLD`
 - `categoryId`: filters by category id
 - `page`, `size`, `sort`: standard Spring pageable parameters
 
-The assistant RAG flow in `interaction-service` uses this endpoint with `keyword`, `status=ACTIVE`, `page=0`, `size=30`, and `sort=id,desc`.
+The assistant RAG flow in `interaction-service` uses this endpoint with `keyword`, `status=APPROVED`, `page=0`, `size=30`, and `sort=id,desc`.
 
 ## CRUD Behavior Summary
 
@@ -654,7 +654,7 @@ Verified locally with Maven tests:
 Verified business behavior through tests and implementation review:
 
 - create product flow
-- get list and detail from active products only
+- get list and detail from approved products only
 - ownership denial on update
 - soft delete for owned product
 - product sold event publication when status transitions to `SOLD`
@@ -775,21 +775,28 @@ Runtime message policy:
 - wishlist API messages are in English
 - wishlist logs are in English
 
-## Hybrid AI Fail-Safe Product Creation
+## Moderated Product Creation and Hybrid AI Fail-Safe
 
 Product creation no longer fails when the externally hosted `ai-service` is unavailable or times out.
 
-Fallback behavior:
+Product status behavior:
+
+- new products are always created as `PENDING_REVIEW`
+- product creation responses use `Product submitted successfully and is pending moderation review.`
+- sellers cannot set product status through create or update requests
+- moderation statuses are assigned only by admin-service
+- `SOLD` is assigned only by the order completed workflow
+
+AI fallback behavior:
 
 - catches AI connection and timeout failures during image analysis
 - stores empty AI metadata instead of rejecting the listing
 - uses `Uncategorized Product` when the submitted title is blank
 - forces the new product status to `PENDING_REVIEW`
 - saves the product normally and continues publishing `product.event.created` after the database commit
-- returns `201 Created` with `Product created successfully but requires manual review due to AI service unavailability.`
 - writes an English warning log containing the saved product ID and AI failure details
 
-The regular AI-assisted flow is unchanged when `ai-service` is available. Docker Compose also no longer waits for the AI container before starting `product-service`.
+The regular AI-assisted flow still stores AI metadata when `ai-service` is available, but admin-service remains responsible for approving the product. Docker Compose also no longer waits for the AI container before starting `product-service`.
 
 ## AI Category Bootstrap
 
@@ -800,3 +807,43 @@ The regular AI-assisted flow is unchanged when `ai-service` is available. Docker
 - preserves existing category records and identifiers
 - uses the exact English AI labels required by moderation label matching
 - allows a fresh deployment to use Smart Upload without manually creating categories first
+
+## Listing Suggestion Preparation
+
+`product-service` exposes a single image-driven listing suggestion endpoint for the seller UI.
+
+Endpoint:
+
+- `POST /api/v1/products/prepare-listing`
+
+Behavior:
+
+- accepts a multipart image field named `file`
+- runs the existing image analysis flow to resolve a suggested product title
+- calls `interaction-service` internally to generate a Vietnamese product description
+- sends `X-User-Id` and `X-Internal-Secret` to the downstream assistant endpoint
+- returns only seller-facing draft fields:
+  - `suggestedTitle`
+  - `suggestedDescription`
+- does not expose AI labels, confidence scores, detection metadata, or suggested pricing to the frontend
+- returns an empty description if assistant generation is unavailable, while preserving the title suggestion when available
+
+Configuration:
+
+- `INTERACTION_SERVICE_BASE_URL` controls the internal assistant service URL
+- Docker Compose sets it to `http://interaction-service:8083`
+
+## Multi-Image Product Posting
+
+Product creation now supports multiple uploaded images while limiting Computer Vision analysis to exactly one selected image.
+
+Behavior:
+
+- `POST /api/v1/products` accepts:
+  - repeated multipart image fields named `files`
+  - optional legacy single image field named `file`
+  - `analysisImageIndex` to choose which uploaded image is sent to `ai-service`
+- all uploaded images are stored and returned in `imageUrls`
+- `imageUrl` remains the primary cover image for backward compatibility
+- only the image at `analysisImageIndex` is analyzed for AI metadata and auto-filled naming support
+- if `imageUrls` metadata is missing or invalid for older rows, the API falls back to the primary `imageUrl`

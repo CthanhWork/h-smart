@@ -46,11 +46,20 @@ public class User {
     @Column(length = 30)
     private String phoneNumber;
 
+    @Column(name = "province_code", length = 20)
+    private String provinceCode;
+
     @Column(length = 100)
     private String province;
 
+    @Column(name = "district_code", length = 20)
+    private String districtCode;
+
     @Column(length = 100)
     private String district;
+
+    @Column(name = "ward_code", length = 20)
+    private String wardCode;
 
     @Column(length = 100)
     private String ward;

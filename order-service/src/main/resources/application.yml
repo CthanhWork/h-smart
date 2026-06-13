@@ -45,6 +45,23 @@ ghtk:
   client-source: ${GHTK_CLIENT_SOURCE:}
   webhook-hash: ${GHTK_WEBHOOK_HASH:}
 
+viettel-post:
+  api-url: ${VIETTEL_POST_API_URL:https://partnerdev.viettelpost.vn}
+  username: ${VIETTEL_POST_USERNAME:}
+  password: ${VIETTEL_POST_PASSWORD:}
+  connect-timeout-ms: ${VIETTEL_POST_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${VIETTEL_POST_READ_TIMEOUT_MS:5000}
+  default-weight-grams: ${VIETTEL_POST_DEFAULT_WEIGHT_GRAMS:1000}
+  service-code: ${VIETTEL_POST_SERVICE_CODE:VCN}
+  service-extra: ${VIETTEL_POST_SERVICE_EXTRA:}
+  product-type: ${VIETTEL_POST_PRODUCT_TYPE:HH}
+  order-payment: ${VIETTEL_POST_ORDER_PAYMENT:3}
+  check-unique: ${VIETTEL_POST_CHECK_UNIQUE:true}
+
+orders:
+  pending-timeout-minutes: ${ORDER_PENDING_TIMEOUT_MINUTES:30}
+  pending-timeout-scan-ms: ${ORDER_PENDING_TIMEOUT_SCAN_MS:60000}
+
 internal:
   security:
     enabled: ${INTERNAL_SECURITY_ENABLED:true}

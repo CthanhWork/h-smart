@@ -1,0 +1,100 @@
+name: H-Smart CI
+
+on:
+  push:
+    branches:
+      - develop
+      - main
+  pull_request:
+    branches:
+      - develop
+      - main
+  workflow_dispatch:
+
+jobs:
+  backend-tests:
+    name: Backend Tests - ${{ matrix.service }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - admin-service
+          - api-gateway
+          - interaction-service
+          - order-service
+          - product-service
+          - search-service
+          - user-service
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Run Maven tests
+        working-directory: ${{ matrix.service }}
+        run: mvn -B test
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.service }}-test-reports
+          path: ${{ matrix.service }}/target/surefire-reports/
+          if-no-files-found: ignore
+
+  ai-service-check:
+    name: AI Service Compile Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Compile Python source
+        working-directory: ai-service
+        run: python -m compileall app
+
+  compose-validation:
+    name: Docker Compose GCP Config Validation
+    runs-on: ubuntu-latest
+    env:
+      EXTERNAL_AI_SERVICE_URL: http://100.64.0.1:8002
+      FRONTEND_BASE_URL: http://localhost:5173
+      INTERNAL_SHARED_SECRET: ci-internal-secret
+      JWT_SECRET: ci-jwt-secret-with-enough-length-for-tests
+      MAIL_USERNAME: ci@example.com
+      MAIL_PASSWORD: ci-mail-password
+      MAIL_FROM: ci@example.com
+      USER_DB_PASSWORD: ci-user-db-password
+      PRODUCT_DB_PASSWORD: ci-product-db-password
+      ORDER_DB_PASSWORD: ci-order-db-password
+      REVIEW_DB_PASSWORD: ci-review-db-password
+      ADMIN_DB_PASSWORD: ci-admin-db-password
+      MONGO_ROOT_PASSWORD: ci-mongo-password
+      RABBITMQ_PASSWORD: ci-rabbitmq-password
+      REDIS_PASSWORD: ci-redis-password
+      AI_PROVIDER_API_KEY: ci-ai-provider-key
+      AI_PROVIDER_MODEL: gemini-2.5-flash
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate GCP compose file
+        run: docker compose -f docker-compose-gcp.yml config --quiet
+
+      - name: List GCP compose services
+        run: docker compose -f docker-compose-gcp.yml config --services

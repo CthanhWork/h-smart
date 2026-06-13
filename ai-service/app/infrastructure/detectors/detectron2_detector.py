@@ -122,6 +122,9 @@ LABEL_TRANSLATIONS: Final[dict[str, str]] = {
     "water_faucet": "Vòi nước",
 }
 
+MIN_INFERENCE_IMAGE_SIDE: Final[int] = 320
+MAX_INFERENCE_IMAGE_SIDE: Final[int] = 640
+
 
 class Detectron2Detector:
     def __init__(
@@ -145,6 +148,8 @@ class Detectron2Detector:
         self.cfg.MODEL.MASK_ON = False
         self.cfg.MODEL.KEYPOINT_ON = False
         self.cfg.MODEL.DEVICE = "cpu"
+        self.cfg.INPUT.MIN_SIZE_TEST = MIN_INFERENCE_IMAGE_SIDE
+        self.cfg.INPUT.MAX_SIZE_TEST = MAX_INFERENCE_IMAGE_SIDE
         self.cfg.DATASETS.TRAIN = ()
         self.cfg.DATASETS.TEST = ()
         self.cfg.DATALOADER.NUM_WORKERS = 0
@@ -190,4 +195,44 @@ class Detectron2Detector:
         image = cv2.imdecode(np_buffer, cv2.IMREAD_COLOR)
         if image is None:
             raise ValueError("Invalid image bytes")
-        return image
+        return Detectron2Detector._resize_for_inference(image)
+
+    @staticmethod
+    def _resize_for_inference(image: np.ndarray) -> np.ndarray:
+        height, width = image.shape[:2]
+        longest_side = max(height, width)
+        if longest_side <= MAX_INFERENCE_IMAGE_SIDE:
+            return image
+
+        scale = MAX_INFERENCE_IMAGE_SIDE / float(longest_side)
+        target_width = max(1, int(width * scale))
+        target_height = max(1, int(height * scale))
+        return cv2.resize(image, (target_width, target_height), interpolation=cv2.INTER_AREA)
+
+
+class DemoDetector:
+    def __init__(self) -> None:
+        self.class_names = CLASS_NAMES
+
+    def predict(self, image_bytes: bytes) -> list[Detection]:
+        if not image_bytes:
+            raise ValueError("Invalid image bytes")
+
+        demo_labels = [
+            "chair",
+            "sofa",
+            "automatic_washer",
+            "television_set",
+            "dining_table",
+            "table_lamp",
+        ]
+        label = demo_labels[sum(image_bytes[:4096]) % len(demo_labels)]
+        return [
+            Detection(
+                label=label,
+                class_id=self.class_names.index(label),
+                score=0.91,
+                bbox=[],
+                translated_label=LABEL_TRANSLATIONS.get(label, label),
+            )
+        ]

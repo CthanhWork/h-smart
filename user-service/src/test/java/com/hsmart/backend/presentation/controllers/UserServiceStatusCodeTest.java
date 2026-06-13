@@ -16,6 +16,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hsmart.backend.application.dto.AuthResponseDTO;
 import com.hsmart.backend.application.dto.LoginRequestDTO;
+import com.hsmart.backend.application.dto.LocationOptionDTO;
 import com.hsmart.backend.application.dto.RegisterRequestDTO;
 import com.hsmart.backend.application.dto.SellerTrustResponseDTO;
 import com.hsmart.backend.application.dto.UpdateProfileRequestDTO;
@@ -31,8 +32,10 @@ import com.hsmart.backend.infrastructure.exception.ResourceNotFoundException;
 import com.hsmart.backend.infrastructure.persistence.UserRepository;
 import com.hsmart.backend.service.AuthService;
 import com.hsmart.backend.service.AccountLifecycleService;
+import com.hsmart.backend.service.LocationCatalogService;
 import com.hsmart.backend.service.UserService;
 import com.hsmart.backend.service.impl.AuthServiceImpl;
+import java.util.List;
 import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -63,6 +66,9 @@ class UserServiceStatusCodeTest {
 
     @MockBean
     private AccountLifecycleService accountLifecycleService;
+
+    @MockBean
+    private LocationCatalogService locationCatalogService;
 
     @Test
     void registerShouldReturn201WhenPayloadIsValid() throws Exception {
@@ -186,7 +192,8 @@ class UserServiceStatusCodeTest {
                 passwordEncoder,
                 jwtService,
                 userMapper,
-                accountLifecycleService
+                accountLifecycleService,
+                mock(LocationCatalogService.class)
         );
         User bannedUser = User.builder()
                 .username("nguyenvana")
@@ -269,9 +276,9 @@ class UserServiceStatusCodeTest {
         UpdateProfileRequestDTO request = UpdateProfileRequestDTO.builder()
                 .fullName("Nguyen Van A Updated")
                 .phoneNumber("0901234567")
-                .province("Ho Chi Minh City")
-                .district("Thu Duc City")
-                .ward("Linh Trung Ward")
+                .provinceCode("79")
+                .districtCode("760")
+                .wardCode("26734")
                 .streetDetail("1 Vo Van Ngan Street")
                 .avatarUrl("https://example.com/avatar.jpg")
                 .build();
@@ -289,6 +296,19 @@ class UserServiceStatusCodeTest {
                 .andExpect(jsonPath("$.status").value(200))
                 .andExpect(jsonPath("$.message").value("Profile updated successfully"))
                 .andExpect(jsonPath("$.data.fullName").value("Nguyen Van A Updated"));
+    }
+
+    @Test
+    void getProvincesShouldReturn200WhenCatalogIsAvailable() throws Exception {
+        given(locationCatalogService.getProvinces()).willReturn(List.of(
+                LocationOptionDTO.builder().code("79").name("Ho Chi Minh City").build()
+        ));
+
+        mockMvc.perform(get("/api/v1/locations/provinces"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value(200))
+                .andExpect(jsonPath("$.message").value("Provinces fetched successfully"))
+                .andExpect(jsonPath("$.data[0].code").value("79"));
     }
 
     @Test
@@ -357,8 +377,11 @@ class UserServiceStatusCodeTest {
                 .role(Role.USER)
                 .fullName("Nguyen Van A")
                 .phoneNumber("0901234567")
+                .provinceCode("79")
                 .province("Ho Chi Minh City")
+                .districtCode("760")
                 .district("Thu Duc City")
+                .wardCode("26734")
                 .ward("Linh Trung Ward")
                 .streetDetail("1 Vo Van Ngan Street")
                 .avatarUrl("https://example.com/avatar.jpg")

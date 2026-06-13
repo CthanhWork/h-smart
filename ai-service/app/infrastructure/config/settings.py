@@ -12,6 +12,7 @@ class Settings:
     model_path: Path
     score_threshold: float
     device: Optional[str]
+    demo_mode: bool
 
 
 @lru_cache
@@ -25,4 +26,5 @@ def get_settings() -> Settings:
         model_path=Path(os.getenv("AI_MODEL_PATH", model_dir / "model.pth")),
         score_threshold=float(os.getenv("AI_SCORE_THRESHOLD", "0.4")),
         device=os.getenv("AI_DEVICE") or "cpu",
+        demo_mode=os.getenv("AI_DEMO_MODE", "false").lower() in {"1", "true", "yes", "on"},
     )

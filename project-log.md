@@ -916,9 +916,9 @@
     - `status`
     - `categoryId`
     - pageable params such as `page`, `size`, and `sort`
-  - RAG client calls with:
+- RAG client calls with:
     - `keyword=<detected keyword>`
-    - `status=ACTIVE`
+    - `status=APPROVED`
     - `page=0`
     - `size=30`
     - `sort=id,desc`
@@ -1286,7 +1286,7 @@
   - endpoint: `POST /api/v1/orders`
   - `buyerId` is read from gateway-provided `X-User-Id`
   - `order-service` calls `product-service` through load-balanced `RestClient`
-  - product must exist and have status `ACTIVE`
+  - product must exist and have status `APPROVED`
   - order amount is copied from the product price
   - order is saved as `PENDING`
 - Order complete flow:
@@ -2259,3 +2259,83 @@
   - `DELETE /api/v1/assistant/history`
 - Split the API Gateway assistant history route from AI generation so MongoDB history operations do not use the AI circuit breaker or generation quota.
 - Added unit coverage for token hashing, expiration, password reset, verification-gated login, and assistant history isolation.
+
+[2026-06-09] seller listing image suggestions consolidated
+
+- Added `POST /api/v1/products/prepare-listing` in `product-service`.
+- The endpoint accepts a product image and returns seller-facing draft fields:
+  - `suggestedTitle`
+  - `suggestedDescription`
+- `product-service` now calls `interaction-service` internally for product description generation after image analysis.
+- The seller UI can auto-fill product title and description when a user selects an image without exposing AI labels, confidence scores, detection metadata, or suggested pricing.
+- Added `INTERACTION_SERVICE_BASE_URL` for product-service in Docker Compose and GCP Compose.
+- Switched the deployed Gemini text generation model to `gemini-3.1-flash-lite` for better RPM/RPD suitability on seller description suggestions.
+- Tightened the product-description prompt so zero-price image suggestions do not produce fake `0 VND` prices, hashtags, greetings, or fake contact text.
+
+[2026-06-09] order checkout safety and delivery confirmation hardened
+
+- Added product reservation protection in `order-service` so each product can only have one active `PENDING` or `PROCESSING` order.
+- Added a PostgreSQL partial unique index for active product orders plus service-level duplicate validation.
+- Updated order completion rules so buyers can only complete `PROCESSING` orders.
+- Protected `GET /api/v1/orders/{id}` so only the current buyer or seller can read the order.
+- Added buyer/seller cancellation for `PENDING` orders.
+- Added scheduled timeout cleanup for stale `PENDING` orders.
+- Added delivery method support:
+  - `GHTK` uses GHTK fee calculation and returns service-unavailable errors when the provider cannot calculate a fee.
+  - `VIETTEL_POST` uses Viettel Post Partner demo APIs for token login, shipping fee calculation, and shipment creation.
+  - manual/self-arranged delivery is no longer supported in checkout.
+- Updated the frontend product detail page so `Mua ngay` opens a confirmation modal before creating an order.
+- Updated the orders page to show delivery method and allow cancelling eligible pending orders.
+- Verified the deployed GCP order-service through API Gateway for pending completion rejection, unauthorized order read protection, duplicate active order rejection, and cancellation.
+
+[2026-06-09] structured address selection added for user profiles and registration
+
+- Added public `user-service` location endpoints:
+  - `GET /api/v1/locations/provinces`
+  - `GET /api/v1/locations/districts?provinceCode=...`
+  - `GET /api/v1/locations/wards?provinceCode=...&districtCode=...`
+- Added a configurable location catalog client in `user-service` backed by `LOCATION_CATALOG_BASE_URL`.
+- `user-service` now stores:
+  - `provinceCode`
+  - `districtCode`
+  - `wardCode`
+  alongside the resolved display names already used in profiles and internal address responses.
+- Registration and profile update flows now resolve province/district/ward names from catalog codes instead of trusting free-text address names from the client.
+- Added explicit `400` handling for invalid location codes and `503` handling for upstream location catalog outages.
+- Updated `api-gateway` so `/api/v1/locations/**` is publicly reachable for registration/profile forms.
+- Updated the frontend authentication modal and profile page so users:
+  - choose province, district, and ward from API-backed selectors
+  - only type the free-form street detail manually
+- Verified:
+  - `mvn -q test` passed for `user-service`
+  - `mvn -q test` passed for `api-gateway`
+  - `npm run build` passed for the UI
+
+[2026-06-09] multi-image product posting with single-image AI analysis
+
+- Updated `product-service` product creation to accept multiple uploaded images for a single listing.
+- Added `analysisImageIndex` so only one chosen image is sent to `ai-service` for naming and moderation metadata.
+- Stored the full product gallery and returned it through `imageUrls`, while keeping `imageUrl` as the primary cover image for compatibility.
+- Updated the seller upload UI to:
+  - upload multiple images
+  - choose one image for listing suggestions
+  - keep seller-editable title and description suggestions
+- Updated the product detail UI to render a real image gallery instead of repeating the same image.
+- Verified:
+  - `mvn -q test` passed for `product-service`
+  - `npm run build` passed for the UI
+
+[2026-06-09] production moderation and carrier-only checkout rules
+
+- Changed product creation so new listings always start as `PENDING_REVIEW`.
+- Blocked sellers from changing product status through create/update product requests.
+- Kept admin-service as the only workflow that can approve or hide listings, and order-service as the workflow that marks completed products as `SOLD`.
+- Changed order-service checkout so only `APPROVED` products can be ordered.
+- Removed self-arranged delivery from checkout.
+- Added `VIETTEL_POST` as a carrier delivery method alongside `GHTK`.
+- Added Viettel Post Partner demo integration in order-service:
+  - login token retrieval through `/v2/user/Login`
+  - fee calculation through `/v2/order/getPriceNlp`
+  - shipment creation through `/v2/order/createOrderNlp`
+- Added Viettel Post environment variables to Docker Compose and GCP Compose without hardcoding partner credentials.
+- Updated the frontend checkout modal and orders page to show only GHTK and Viettel Post delivery methods.

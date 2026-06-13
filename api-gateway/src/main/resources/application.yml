@@ -22,6 +22,10 @@ spring:
           uri: lb://user-service
           predicates:
             - Path=/api/v1/auth/**
+        - id: user-location-route
+          uri: lb://user-service
+          predicates:
+            - Path=/api/v1/locations/**
         - id: user-profile-route
           uri: lb://user-service
           predicates:
@@ -116,6 +120,11 @@ eureka:
     instance-id: ${spring.application.name}:${server.port}
 
 resilience4j:
+  timelimiter:
+    instances:
+      assistantCircuitBreaker:
+        timeoutDuration: ${ASSISTANT_CIRCUIT_BREAKER_TIMEOUT:60s}
+        cancelRunningFuture: false
   circuitbreaker:
     configs:
       default:

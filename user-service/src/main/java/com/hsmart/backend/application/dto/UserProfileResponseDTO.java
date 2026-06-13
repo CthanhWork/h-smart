@@ -20,8 +20,11 @@ public class UserProfileResponseDTO {
     private Role role;
     private String fullName;
     private String phoneNumber;
+    private String provinceCode;
     private String province;
+    private String districtCode;
     private String district;
+    private String wardCode;
     private String ward;
     private String streetDetail;
     private String avatarUrl;

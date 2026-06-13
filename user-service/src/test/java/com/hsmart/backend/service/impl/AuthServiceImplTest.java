@@ -17,6 +17,7 @@ import com.hsmart.backend.infrastructure.exception.AccountNotVerifiedException;
 import com.hsmart.backend.infrastructure.exception.InvalidCredentialsException;
 import com.hsmart.backend.infrastructure.persistence.UserRepository;
 import com.hsmart.backend.service.AccountLifecycleService;
+import com.hsmart.backend.service.LocationCatalogService;
 import java.util.Optional;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -39,6 +40,8 @@ class AuthServiceImplTest {
     private UserMapper userMapper;
     @Mock
     private AccountLifecycleService accountLifecycleService;
+    @Mock
+    private LocationCatalogService locationCatalogService;
 
     private AuthServiceImpl service;
 
@@ -49,7 +52,8 @@ class AuthServiceImplTest {
                 passwordEncoder,
                 jwtService,
                 userMapper,
-                accountLifecycleService
+                accountLifecycleService,
+                locationCatalogService
         );
     }
 

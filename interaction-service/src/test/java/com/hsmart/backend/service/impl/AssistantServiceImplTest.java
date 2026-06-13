@@ -287,12 +287,15 @@ class AssistantServiceImplTest {
         assertEquals(2, prompt.size());
         assertEquals("system", prompt.get(0).role());
         assertEquals(true, prompt.get(0).content().contains("expert copywriter for H-Smart"));
-        assertEquals(true, prompt.get(0).content().contains("under 150 words"));
+        assertEquals(true, prompt.get(0).content().contains("45 to 60 Vietnamese words"));
         assertEquals("user", prompt.get(1).role());
         assertEquals(true, prompt.get(1).content().contains("Product name: Leather sofa"));
         assertEquals(true, prompt.get(1).content().contains("Category: Living room furniture"));
         assertEquals(true, prompt.get(1).content().contains("Condition: Used, minor scratch"));
         assertEquals(true, prompt.get(1).content().contains("Price: 1500000 VND"));
+        assertEquals(true, prompt.get(1).content().contains("friendly buyer-focused tone"));
+        assertEquals(true, prompt.get(1).content().contains("Do not ask buyers to contact or message anyone"));
+        assertEquals(true, prompt.get(1).content().contains("previously owned only"));
         verifyNoInteractions(chatMessageRepository, intentClassifier, orderClient, policySearchService, productContextService);
     }
 

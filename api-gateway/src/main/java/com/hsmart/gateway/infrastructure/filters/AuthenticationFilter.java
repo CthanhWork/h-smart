@@ -35,6 +35,7 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
     private static final String PRODUCT_CATEGORIES_PATH = "/api/v1/products/categories";
     private static final List<String> PUBLIC_PATHS = List.of(
             "/api/v1/auth/**",
+            "/api/v1/locations/**",
             "/api/v1/products/media/**",
             "/api/v1/search/**",
             "/api/v1/orders/internal/ghtk-webhook",

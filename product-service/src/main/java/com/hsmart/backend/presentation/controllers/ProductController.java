@@ -3,15 +3,19 @@ package com.hsmart.backend.presentation.controllers;
 import com.hsmart.backend.application.dto.ApiResponse;
 import com.hsmart.backend.application.dto.ImageAnalysisResponseDTO;
 import com.hsmart.backend.application.dto.PageResponseDTO;
+import com.hsmart.backend.application.dto.ProductListingSuggestionResponseDTO;
 import com.hsmart.backend.application.dto.ProductModerationStatusRequest;
 import com.hsmart.backend.application.dto.ProductRequestDTO;
 import com.hsmart.backend.application.dto.ProductResponseDTO;
 import com.hsmart.backend.application.dto.ProductStatsResponseDTO;
 import com.hsmart.backend.domain.entities.ProductStatus;
 import com.hsmart.backend.service.ProductImageAnalysisService;
+import com.hsmart.backend.service.ProductListingSuggestionService;
 import com.hsmart.backend.service.ProductService;
 import jakarta.validation.Valid;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springdoc.core.annotations.ParameterObject;
 import org.springframework.data.domain.Pageable;
@@ -40,27 +44,46 @@ import org.springframework.web.server.ResponseStatusException;
 public class ProductController {
 
     private static final String PRODUCT_CREATED_MESSAGE = "Product created successfully";
-    private static final String PRODUCT_CREATED_WITH_MANUAL_REVIEW_MESSAGE =
-            "Product created successfully but requires manual review due to AI service unavailability.";
+    private static final String PRODUCT_CREATED_PENDING_REVIEW_MESSAGE =
+            "Product submitted successfully and is pending moderation review.";
 
     private final ProductService productService;
     private final ProductImageAnalysisService productImageAnalysisService;
+    private final ProductListingSuggestionService productListingSuggestionService;
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<ProductResponseDTO>> createProduct(
             @Valid @ModelAttribute ProductRequestDTO request,
-            @RequestPart("file") MultipartFile file
+            @RequestPart(name = "files", required = false) List<MultipartFile> files,
+            @RequestPart(name = "file", required = false) MultipartFile file,
+            @RequestParam(name = "analysisImageIndex", defaultValue = "0") int analysisImageIndex
     ) throws IOException {
-        if (file == null || file.isEmpty()) {
+        List<MultipartFile> normalizedFiles = normalizeFiles(files, file);
+        if (normalizedFiles.isEmpty()) {
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Image file is required");
         }
 
-        ProductResponseDTO response = productService.createProduct(request, file);
+        ProductResponseDTO response = productService.createProduct(request, normalizedFiles, analysisImageIndex);
         String message = response.getStatus() == ProductStatus.PENDING_REVIEW
-                ? PRODUCT_CREATED_WITH_MANUAL_REVIEW_MESSAGE
+                ? PRODUCT_CREATED_PENDING_REVIEW_MESSAGE
                 : PRODUCT_CREATED_MESSAGE;
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.success(HttpStatus.CREATED, message, response));
+    }
+
+    private List<MultipartFile> normalizeFiles(List<MultipartFile> files, MultipartFile singleFile) {
+        List<MultipartFile> normalizedFiles = new ArrayList<>();
+        if (files != null) {
+            normalizedFiles.addAll(
+                    files.stream()
+                            .filter(file -> file != null && !file.isEmpty())
+                            .toList()
+            );
+        }
+        if (singleFile != null && !singleFile.isEmpty()) {
+            normalizedFiles.add(singleFile);
+        }
+        return normalizedFiles;
     }
 
     @PostMapping(value = "/analyze-image", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
@@ -73,6 +96,18 @@ public class ProductController {
 
         ImageAnalysisResponseDTO response = productImageAnalysisService.analyzeImage(file);
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Product image analyzed successfully", response));
+    }
+
+    @PostMapping(value = "/prepare-listing", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    public ResponseEntity<ApiResponse<ProductListingSuggestionResponseDTO>> prepareListing(
+            @RequestPart("file") MultipartFile file
+    ) {
+        if (file == null || file.isEmpty()) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Image file is required");
+        }
+
+        ProductListingSuggestionResponseDTO response = productListingSuggestionService.prepareListing(file);
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Product listing suggestions prepared successfully", response));
     }
 
     @PutMapping("/{id}")

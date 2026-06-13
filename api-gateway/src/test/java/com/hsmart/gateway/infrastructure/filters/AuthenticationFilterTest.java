@@ -68,6 +68,25 @@ class AuthenticationFilterTest {
     }
 
     @Test
+    void shouldBypassAuthenticationForPublicLocationPath() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/locations/provinces").build()
+        );
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertTrue(chainCalled.get());
+        verifyNoInteractions(jwtService);
+    }
+
+    @Test
     void shouldBypassAuthenticationForGhtkWebhookPath() {
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.post("/api/v1/orders/internal/ghtk-webhook?hash=webhook-secret").build()

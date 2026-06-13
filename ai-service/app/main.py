@@ -4,7 +4,7 @@ from fastapi import FastAPI
 
 from app.application.use_cases.predict_image import PredictImageUseCase
 from app.infrastructure.config.settings import get_settings
-from app.infrastructure.detectors.detectron2_detector import Detectron2Detector
+from app.infrastructure.detectors.detectron2_detector import DemoDetector, Detectron2Detector
 from app.presentation.api.routes.health import router as health_router
 from app.presentation.api.routes.predict import router as predict_router
 
@@ -12,7 +12,7 @@ from app.presentation.api.routes.predict import router as predict_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
-    detector = Detectron2Detector(
+    detector = DemoDetector() if settings.demo_mode else Detectron2Detector(
         model_path=settings.model_path,
         score_threshold=settings.score_threshold,
     )

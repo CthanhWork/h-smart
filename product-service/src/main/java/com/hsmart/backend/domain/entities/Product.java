@@ -53,6 +53,11 @@ public class Product {
     @Column(name = "image_url", columnDefinition = "text")
     private String imageUrl;
 
+    @Builder.Default
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "image_urls", columnDefinition = "jsonb", nullable = false)
+    private String imageUrls = "[]";
+
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")
     private Category category;
@@ -77,10 +82,13 @@ public class Product {
     @PrePersist
     public void applyDefaults() {
         if (status == null) {
-            status = ProductStatus.ACTIVE;
+            status = ProductStatus.PENDING_REVIEW;
         }
         if (aiMetadata == null || aiMetadata.isBlank()) {
             aiMetadata = "[]";
+        }
+        if (imageUrls == null || imageUrls.isBlank()) {
+            imageUrls = "[]";
         }
     }
 }

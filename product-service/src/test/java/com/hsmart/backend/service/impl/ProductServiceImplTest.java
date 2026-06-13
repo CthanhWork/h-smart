@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -12,7 +13,9 @@ import static org.mockito.Mockito.when;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hsmart.backend.application.dto.ApiResponse;
+import com.hsmart.backend.application.dto.DetectionDTO;
 import com.hsmart.backend.application.dto.PageResponseDTO;
+import com.hsmart.backend.application.dto.PredictResponseDTO;
 import com.hsmart.backend.application.dto.ProductRequestDTO;
 import com.hsmart.backend.application.dto.ProductResponseDTO;
 import com.hsmart.backend.application.exceptions.AiServiceUnavailableException;
@@ -93,13 +96,30 @@ class ProductServiceImplTest {
                 new ProductNamingSupport(),
                 productEventPublisher
         );
+        org.mockito.Mockito.lenient()
+                .when(productMapper.toResponse(any(Product.class), anyList(), eq("http://localhost:8000")))
+                .thenAnswer(invocation -> {
+                    Product product = invocation.getArgument(0);
+                    return ProductResponseDTO.builder()
+                            .id(product.getId())
+                            .title(product.getTitle())
+                            .description(product.getDescription())
+                            .price(product.getPrice())
+                            .status(product.getStatus())
+                            .sellerId(product.getSellerId())
+                            .imageUrl("http://localhost:8000/api/v1/products/media/mock.jpg")
+                            .build();
+                });
+        org.mockito.Mockito.lenient()
+                .when(productMapper.toAbsoluteImageUrl(anyString(), anyString()))
+                .thenAnswer(invocation -> invocation.getArgument(0) + "/" + invocation.getArgument(1));
     }
 
     @Test
     void createProductShouldRequireManualReviewWhenAiServiceIsUnavailable() throws IOException {
         UserContextHolder.setCurrentUserId("seller-1");
         MockMultipartFile image = new MockMultipartFile(
-                "file",
+                "files",
                 "desk.jpg",
                 "image/jpeg",
                 new byte[]{1, 2, 3}
@@ -116,6 +136,7 @@ class ProductServiceImplTest {
                 .price(BigDecimal.valueOf(100))
                 .status(ProductStatus.PENDING_REVIEW)
                 .sellerId("seller-1")
+                .imageUrls("[\"api/v1/products/media/mock.jpg\"]")
                 .aiMetadata("[]")
                 .build();
         ProductResponseDTO response = ProductResponseDTO.builder()
@@ -136,17 +157,19 @@ class ProductServiceImplTest {
                 eq(null),
                 eq("Uncategorized Product"),
                 argThat(imageUrl -> imageUrl.startsWith("api/v1/products/media/")),
+                argThat(imageUrlsJson -> imageUrlsJson.contains("api/v1/products/media/")),
                 eq("[]")
         )).thenReturn(pendingProduct);
         when(productRepository.save(pendingProduct)).thenReturn(pendingProduct);
         when(productMapper.toResponse(eq(pendingProduct), anyList(), eq("http://localhost:8000")))
                 .thenReturn(response);
 
-        ProductResponseDTO result = productService.createProduct(request, image);
+        ProductResponseDTO result = productService.createProduct(request, List.of(image), 0);
 
         Assertions.assertEquals(ProductStatus.PENDING_REVIEW, result.getStatus());
         Assertions.assertEquals("Uncategorized Product", result.getTitle());
         Assertions.assertTrue(result.getAiMetadata().isEmpty());
+        Assertions.assertEquals(1, result.getImageUrls().size());
         verify(productRepository).save(pendingProduct);
         verify(productEventPublisher).publishProductCreated(argThat(event ->
                 event.getId().equals(25L)
@@ -161,6 +184,7 @@ class ProductServiceImplTest {
                 eq(null),
                 eq("Uncategorized Product"),
                 any(String.class),
+                any(String.class),
                 eq("[]")
         );
     }
@@ -168,12 +192,12 @@ class ProductServiceImplTest {
     @Test
     void createProductControllerShouldReturnManualReviewMessageForAiFallback() throws IOException {
         ProductService productServiceMock = mock(ProductService.class);
-        ProductController controller = new ProductController(productServiceMock, null);
+        ProductController controller = new ProductController(productServiceMock, null, null);
         ProductRequestDTO request = ProductRequestDTO.builder()
                 .price(BigDecimal.valueOf(100))
                 .build();
         MockMultipartFile image = new MockMultipartFile(
-                "file",
+                "files",
                 "desk.jpg",
                 "image/jpeg",
                 new byte[]{1, 2, 3}
@@ -183,18 +207,112 @@ class ProductServiceImplTest {
                 .title("Uncategorized Product")
                 .status(ProductStatus.PENDING_REVIEW)
                 .build();
-        when(productServiceMock.createProduct(request, image)).thenReturn(product);
+        when(productServiceMock.createProduct(request, List.of(image), 0)).thenReturn(product);
 
-        ResponseEntity<ApiResponse<ProductResponseDTO>> response = controller.createProduct(request, image);
+        ResponseEntity<ApiResponse<ProductResponseDTO>> response = controller.createProduct(request, List.of(image), null, 0);
 
         Assertions.assertEquals(HttpStatus.CREATED, response.getStatusCode());
         Assertions.assertNotNull(response.getBody());
         Assertions.assertEquals(
-                "Product created successfully but requires manual review due to AI service unavailability.",
+                "Product submitted successfully and is pending moderation review.",
                 response.getBody().getMessage()
         );
         Assertions.assertEquals(product, response.getBody().getData());
-        verify(productServiceMock).createProduct(request, image);
+        verify(productServiceMock).createProduct(request, List.of(image), 0);
+    }
+
+    @Test
+    void createProductShouldAnalyzeOnlySelectedImageAndPersistFullGallery() throws IOException {
+        UserContextHolder.setCurrentUserId("seller-1");
+        MockMultipartFile firstImage = new MockMultipartFile(
+                "files",
+                "front.jpg",
+                "image/jpeg",
+                new byte[]{1, 2, 3}
+        );
+        MockMultipartFile secondImage = new MockMultipartFile(
+                "files",
+                "detail.jpg",
+                "image/jpeg",
+                new byte[]{4, 5, 6}
+        );
+        ProductRequestDTO request = ProductRequestDTO.builder()
+                .title(" ")
+                .description("Clean used chair")
+                .price(BigDecimal.valueOf(250000))
+                .build();
+        PredictResponseDTO prediction = PredictResponseDTO.builder()
+                .detections(List.of(DetectionDTO.builder()
+                        .label("chair")
+                        .score(0.91)
+                        .build()))
+                .build();
+
+        when(visionService.detectObjects(secondImage)).thenReturn(prediction);
+        when(productMapper.toEntity(
+                eq("Clean used chair"),
+                eq(BigDecimal.valueOf(250000)),
+                eq(ProductStatus.PENDING_REVIEW),
+                eq("seller-1"),
+                eq(null),
+                eq("Ghe"),
+                anyString(),
+                anyString(),
+                anyString()
+        )).thenAnswer(invocation -> Product.builder()
+                .id(30L)
+                .title(invocation.getArgument(5))
+                .description(invocation.getArgument(0))
+                .price(invocation.getArgument(1))
+                .status(invocation.getArgument(2))
+                .sellerId(invocation.getArgument(3))
+                .imageUrl(invocation.getArgument(6))
+                .imageUrls(invocation.getArgument(7))
+                .aiMetadata(invocation.getArgument(8))
+                .build());
+        when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));
+
+        ProductResponseDTO result = productService.createProduct(request, List.of(firstImage, secondImage), 1);
+
+        verify(visionService).detectObjects(secondImage);
+        verify(visionService, org.mockito.Mockito.never()).detectObjects(firstImage);
+        Assertions.assertEquals(ProductStatus.PENDING_REVIEW, result.getStatus());
+        Assertions.assertEquals("Ghe", result.getTitle());
+        Assertions.assertEquals(2, result.getImageUrls().size());
+        Assertions.assertTrue(result.getImageUrls().stream().allMatch(url ->
+                url.startsWith("http://localhost:8000/api/v1/products/media/")));
+        verify(productEventPublisher).publishProductCreated(argThat(event ->
+                event.getId().equals(30L)
+                        && event.getStatus().equals("PENDING_REVIEW")
+                        && event.getAiMetadata().size() == 1
+                        && event.getAiMetadata().get(0).getLabel().equals("chair")
+        ));
+    }
+
+    @Test
+    void createProductShouldRejectInvalidAnalysisImageIndexBeforeCallingAi() {
+        UserContextHolder.setCurrentUserId("seller-1");
+        MockMultipartFile image = new MockMultipartFile(
+                "files",
+                "front.jpg",
+                "image/jpeg",
+                new byte[]{1, 2, 3}
+        );
+        ProductRequestDTO request = ProductRequestDTO.builder()
+                .title("Chair")
+                .description("Clean used chair")
+                .price(BigDecimal.valueOf(250000))
+                .build();
+
+        org.springframework.web.server.ResponseStatusException exception = assertThrows(
+                org.springframework.web.server.ResponseStatusException.class,
+                () -> productService.createProduct(request, List.of(image), 1)
+        );
+
+        Assertions.assertEquals(HttpStatus.BAD_REQUEST, exception.getStatusCode());
+        Assertions.assertEquals("analysisImageIndex must reference one of the uploaded images", exception.getReason());
+        verify(visionService, org.mockito.Mockito.never()).detectObjects(any());
+        verify(productRepository, org.mockito.Mockito.never()).save(any());
     }
 
     @AfterEach
@@ -247,7 +365,7 @@ class ProductServiceImplTest {
     }
 
     @Test
-    void updateProductShouldPublishEventWhenStatusTransitionsToSold() {
+    void updateProductShouldRejectClientManagedStatusChanges() {
         UserContextHolder.setCurrentUserId("seller-1");
         Product product = Product.builder()
                 .id(12L)
@@ -259,7 +377,6 @@ class ProductServiceImplTest {
                 .build();
 
         when(productRepository.findByIdAndIsDeletedFalse(12L)).thenReturn(Optional.of(product));
-        when(productRepository.save(product)).thenReturn(product);
 
         ProductRequestDTO request = ProductRequestDTO.builder()
                 .title("Microwave")
@@ -268,20 +385,8 @@ class ProductServiceImplTest {
                 .status(ProductStatus.SOLD)
                 .build();
 
-        productService.updateProduct(12L, request);
-
-        verify(productEventPublisher, times(1)).publishProductSold(argThat(event ->
-                event.getProductId().equals(12L)
-                        && event.getSellerId().equals("seller-1")
-                        && event.getTitle().equals("Microwave")
-        ));
-        verify(productEventPublisher, times(1)).publishProductUpdated(argThat(event ->
-                event.getId().equals(12L)
-                        && event.getTitle().equals("Microwave")
-                        && event.getDescription().equals("Ready to pick up")
-                        && event.getPrice().compareTo(BigDecimal.valueOf(120)) == 0
-                        && event.getStatus().equals("SOLD")
-        ));
+        assertThrows(org.springframework.web.server.ResponseStatusException.class,
+                () -> productService.updateProduct(12L, request));
     }
 
     @Test

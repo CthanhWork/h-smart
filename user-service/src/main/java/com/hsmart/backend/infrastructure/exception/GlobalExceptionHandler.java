@@ -43,8 +43,20 @@ public class GlobalExceptionHandler {
                 .body(ApiResponse.error(HttpStatus.BAD_REQUEST, exception.getMessage()));
     }
 
+    @ExceptionHandler(InvalidLocationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleInvalidLocation(InvalidLocationException exception) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.error(HttpStatus.BAD_REQUEST, exception.getMessage()));
+    }
+
     @ExceptionHandler(EmailDeliveryException.class)
     public ResponseEntity<ApiResponse<Void>> handleEmailDelivery(EmailDeliveryException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage()));
+    }
+
+    @ExceptionHandler(LocationCatalogUnavailableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleLocationCatalogUnavailable(LocationCatalogUnavailableException exception) {
         return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
                 .body(ApiResponse.error(HttpStatus.SERVICE_UNAVAILABLE, exception.getMessage()));
     }

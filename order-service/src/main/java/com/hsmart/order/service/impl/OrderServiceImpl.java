@@ -12,6 +12,8 @@ import com.hsmart.order.application.exceptions.InvalidGhtkWebhookException;
 import com.hsmart.order.application.exceptions.OrderNotFoundException;
 import com.hsmart.order.application.exceptions.OrderStateException;
 import com.hsmart.order.application.exceptions.ProductUnavailableException;
+import com.hsmart.order.application.exceptions.ShippingProviderUnavailableException;
+import com.hsmart.order.domain.entities.DeliveryMethod;
 import com.hsmart.order.domain.entities.Order;
 import com.hsmart.order.domain.entities.OrderStatus;
 import com.hsmart.order.infrastructure.config.GhtkProperties;
@@ -19,13 +21,18 @@ import com.hsmart.order.infrastructure.messaging.OrderEventPublisher;
 import com.hsmart.order.infrastructure.persistence.OrderRepository;
 import com.hsmart.order.service.OrderService;
 import com.hsmart.order.service.ProductClient;
-import com.hsmart.order.service.GhtkClient;
+import com.hsmart.order.service.ShippingProviderClient;
 import com.hsmart.order.service.UserClient;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.LocalDateTime;
+import java.util.List;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -38,21 +45,27 @@ import org.springframework.util.StringUtils;
 @Transactional
 public class OrderServiceImpl implements OrderService {
 
-    private static final String ACTIVE_STATUS = "ACTIVE";
     private static final String APPROVED_STATUS = "APPROVED";
+    private static final List<OrderStatus> ACTIVE_ORDER_STATUSES = List.of(OrderStatus.PENDING, OrderStatus.PROCESSING);
 
     private final OrderRepository orderRepository;
     private final ProductClient productClient;
     private final UserClient userClient;
-    private final GhtkClient ghtkClient;
+    private final List<ShippingProviderClient> shippingProviderClients;
     private final OrderEventPublisher orderEventPublisher;
     private final GhtkProperties ghtkProperties;
+
+    @Value("${orders.pending-timeout-minutes:30}")
+    private long pendingTimeoutMinutes;
 
     @Override
     public OrderResponseDTO createOrder(CreateOrderRequestDTO request, String buyerId) {
         ProductResponseDTO product = productClient.getProduct(request.getProductId(), buyerId);
         validateProductCanBeOrdered(product, buyerId);
-        BigDecimal shippingFee = resolveShippingFee(product.sellerId(), buyerId);
+        ensureProductHasNoActiveOrder(product.id());
+        DeliveryMethod deliveryMethod = resolveDeliveryMethod(request);
+        ShippingProviderClient shippingProviderClient = resolveShippingProvider(deliveryMethod);
+        BigDecimal shippingFee = resolveShippingFee(product.sellerId(), buyerId, shippingProviderClient);
 
         Order order = Order.builder()
                 .buyerId(buyerId)
@@ -60,33 +73,48 @@ public class OrderServiceImpl implements OrderService {
                 .productId(product.id())
                 .amount(product.price().add(shippingFee))
                 .shippingFee(shippingFee)
+                .deliveryMethod(deliveryMethod)
                 .status(OrderStatus.PENDING)
                 .build();
 
-        Order savedOrder = orderRepository.save(order);
+        Order savedOrder = saveNewOrder(order);
         log.info("Created pending order {} for buyer {} and product {}", savedOrder.getId(), buyerId, product.id());
         return toResponse(savedOrder);
     }
 
-    private BigDecimal resolveShippingFee(String sellerId, String buyerId) {
+    private Order saveNewOrder(Order order) {
+        try {
+            return orderRepository.save(order);
+        } catch (DataIntegrityViolationException exception) {
+            throw new ProductUnavailableException("Product already has an active order");
+        }
+    }
+
+    private BigDecimal resolveShippingFee(
+            String sellerId,
+            String buyerId,
+            ShippingProviderClient shippingProviderClient
+    ) {
         try {
             UserAddressResponseDTO sellerAddress = userClient.getUserAddress(sellerId);
             UserAddressResponseDTO buyerAddress = userClient.getUserAddress(buyerId);
-            return ghtkClient.calculateShippingFee(sellerAddress, buyerAddress);
+            return shippingProviderClient.calculateShippingFee(sellerAddress, buyerAddress);
         } catch (RuntimeException exception) {
             log.warn(
-                    "Shipping fee calculation failed for seller {} and buyer {}. Defaulting shipping fee to zero",
+                    "Shipping fee calculation failed for seller {} and buyer {} through {}",
                     sellerId,
                     buyerId,
+                    shippingProviderClient.deliveryMethod(),
                     exception
             );
-            return BigDecimal.ZERO;
+            throw new ShippingProviderUnavailableException("Shipping fee calculation failed", exception);
         }
     }
 
     @Override
     public OrderResponseDTO confirmOrder(Long orderId, String sellerId) {
         Order order = findOrder(orderId);
+        order = expirePendingOrderIfNeeded(order);
         if (!order.getSellerId().equals(sellerId)) {
             throw new OrderStateException("Only the seller can confirm this order");
         }
@@ -97,9 +125,10 @@ public class OrderServiceImpl implements OrderService {
         ProductResponseDTO product = productClient.getProduct(order.getProductId(), sellerId);
         UserAddressResponseDTO sellerAddress = userClient.getUserAddress(order.getSellerId());
         UserAddressResponseDTO buyerAddress = userClient.getUserAddress(order.getBuyerId());
+        ShippingProviderClient shippingProviderClient = resolveShippingProvider(order.getDeliveryMethod());
 
         try {
-            String trackingCode = ghtkClient.createShipment(new GhtkShipmentRequestDTO(
+            String trackingCode = shippingProviderClient.createShipment(new GhtkShipmentRequestDTO(
                     order.getId().toString(),
                     product.title(),
                     product.price(),
@@ -110,7 +139,12 @@ public class OrderServiceImpl implements OrderService {
             order.setTrackingCode(trackingCode);
             order.setStatus(OrderStatus.PROCESSING);
             Order savedOrder = orderRepository.save(order);
-            log.info("Confirmed order {} with GHTK tracking code {}", savedOrder.getId(), trackingCode);
+            log.info(
+                    "Confirmed order {} with {} tracking code {}",
+                    savedOrder.getId(),
+                    shippingProviderClient.deliveryMethod(),
+                    trackingCode
+            );
             return toResponse(savedOrder);
         } catch (IllegalArgumentException exception) {
             throw new OrderStateException(exception.getMessage());
@@ -141,16 +175,34 @@ public class OrderServiceImpl implements OrderService {
     @Override
     public OrderResponseDTO completeOrder(Long orderId, String buyerId) {
         Order order = findOrder(orderId);
+        order = expirePendingOrderIfNeeded(order);
 
         if (!order.getBuyerId().equals(buyerId)) {
             throw new OrderStateException("Only the buyer can complete this order");
         }
 
-        if (order.getStatus() != OrderStatus.PENDING && order.getStatus() != OrderStatus.PROCESSING) {
-            throw new OrderStateException("Only pending or processing orders can be completed");
+        if (order.getStatus() != OrderStatus.PROCESSING) {
+            throw new OrderStateException("Only processing orders can be completed");
         }
 
         return markOrderCompleted(order);
+    }
+
+    @Override
+    public OrderResponseDTO cancelOrder(Long orderId, String currentUserId) {
+        Order order = findOrder(orderId);
+        order = expirePendingOrderIfNeeded(order);
+        if (!order.getBuyerId().equals(currentUserId) && !order.getSellerId().equals(currentUserId)) {
+            throw new OrderStateException("Only the buyer or seller can cancel this order");
+        }
+        if (order.getStatus() != OrderStatus.PENDING) {
+            throw new OrderStateException("Only pending orders can be cancelled");
+        }
+
+        order.setStatus(OrderStatus.CANCELLED);
+        Order savedOrder = orderRepository.save(order);
+        log.info("Cancelled pending order {} by user {}", savedOrder.getId(), currentUserId);
+        return toResponse(savedOrder);
     }
 
     private OrderResponseDTO markOrderCompleted(Order order) {
@@ -168,8 +220,19 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional(readOnly = true)
-    public OrderResponseDTO getOrder(Long orderId) {
-        return toResponse(findOrder(orderId));
+    public List<OrderResponseDTO> getOrdersForCurrentUser(String currentUserId) {
+        return orderRepository.findByBuyerIdOrSellerIdOrderByCreatedAtDescIdDesc(currentUserId, currentUserId)
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public OrderResponseDTO getOrder(Long orderId, String currentUserId) {
+        Order order = orderRepository.findByIdAndBuyerIdOrIdAndSellerId(orderId, currentUserId, orderId, currentUserId)
+                .orElseThrow(() -> new OrderNotFoundException(orderId));
+        return toResponse(order);
     }
 
     @Override
@@ -208,7 +271,51 @@ public class OrderServiceImpl implements OrderService {
     }
 
     private boolean isOrderableStatus(String status) {
-        return ACTIVE_STATUS.equalsIgnoreCase(status) || APPROVED_STATUS.equalsIgnoreCase(status);
+        return APPROVED_STATUS.equalsIgnoreCase(status);
+    }
+
+    private void ensureProductHasNoActiveOrder(Long productId) {
+        if (orderRepository.existsByProductIdAndStatusIn(productId, ACTIVE_ORDER_STATUSES)) {
+            throw new ProductUnavailableException("Product already has an active order");
+        }
+    }
+
+    private DeliveryMethod resolveDeliveryMethod(CreateOrderRequestDTO request) {
+        return request.getDeliveryMethod() != null ? request.getDeliveryMethod() : DeliveryMethod.GHTK;
+    }
+
+    private ShippingProviderClient resolveShippingProvider(DeliveryMethod deliveryMethod) {
+        DeliveryMethod resolvedDeliveryMethod = deliveryMethod != null ? deliveryMethod : DeliveryMethod.GHTK;
+        return shippingProviderClients.stream()
+                .filter(client -> client.deliveryMethod() == resolvedDeliveryMethod)
+                .findFirst()
+                .orElseThrow(() -> new OrderStateException("Unsupported delivery method"));
+    }
+
+    private Order expirePendingOrderIfNeeded(Order order) {
+        if (order.getStatus() != OrderStatus.PENDING || order.getCreatedAt() == null || pendingTimeoutMinutes <= 0) {
+            return order;
+        }
+        if (!order.getCreatedAt().isBefore(LocalDateTime.now().minusMinutes(pendingTimeoutMinutes))) {
+            return order;
+        }
+
+        order.setStatus(OrderStatus.CANCELLED);
+        Order savedOrder = orderRepository.save(order);
+        log.info("Cancelled expired pending order {}", savedOrder.getId());
+        return savedOrder;
+    }
+
+    @Scheduled(fixedDelayString = "${orders.pending-timeout-scan-ms:60000}")
+    public void cancelExpiredPendingOrders() {
+        if (pendingTimeoutMinutes <= 0) {
+            return;
+        }
+        LocalDateTime expiredBefore = LocalDateTime.now().minusMinutes(pendingTimeoutMinutes);
+        int cancelledCount = orderRepository.cancelExpiredPendingOrders(expiredBefore);
+        if (cancelledCount > 0) {
+            log.info("Cancelled {} expired pending orders", cancelledCount);
+        }
     }
 
     private Order findOrder(Long orderId) {
@@ -253,6 +360,7 @@ public class OrderServiceImpl implements OrderService {
                 .amount(order.getAmount())
                 .shippingFee(order.getShippingFee())
                 .trackingCode(order.getTrackingCode())
+                .deliveryMethod(order.getDeliveryMethod())
                 .status(order.getStatus())
                 .createdAt(order.getCreatedAt())
                 .updatedAt(order.getUpdatedAt())

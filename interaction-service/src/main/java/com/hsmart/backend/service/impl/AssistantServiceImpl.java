@@ -47,8 +47,12 @@ public class AssistantServiceImpl implements AssistantService {
     private static final Locale VIETNAM_LOCALE = Locale.forLanguageTag("vi-VN");
     private static final String PRODUCT_DESCRIPTION_SYSTEM_PROMPT = "You are an expert copywriter for H-Smart, "
             + "a C2C marketplace for second-hand household appliances in Vietnam. Your task is to write a catchy, "
-            + "honest, and SEO-friendly product description in Vietnamese based on the provided details. Keep it "
-            + "under 150 words. Format with bullet points for readability. Do not include fake contact info.";
+            + "honest, and SEO-friendly editable draft product description in Vietnamese based on the provided "
+            + "details. Return one natural sales-oriented paragraph of about 45 to 60 Vietnamese words. "
+            + "Make it useful for a buyer who is evaluating the item details. "
+            + "Do not invent brand, model, size, quality level, working condition, warranty, accessories, defects, "
+            + "contact info, seller contact calls, requests to message the seller, hashtags, greetings, markdown "
+            + "headings, bullet points, or any price that was not provided by the seller.";
 
     private final ChatMessageRepository chatMessageRepository;
     private final AssistantModelClient assistantModelClient;
@@ -298,11 +302,27 @@ public class AssistantServiceImpl implements AssistantService {
     }
 
     private String buildProductDescriptionUserPrompt(ProductDescriptionRequest request) {
-        return "Write a product listing description from these provided details:\n"
+        return "Write a safe editable product listing description for a marketplace listing from these provided details only:\n"
                 + "- Product name: " + request.getProductName().trim() + "\n"
                 + "- Category: " + request.getCategory().trim() + "\n"
                 + "- Condition: " + request.getCondition().trim() + "\n"
-                + "- Price: " + request.getPrice().stripTrailingZeros().toPlainString() + " VND";
+                + buildProductDescriptionPriceLine(request) + "\n"
+                + "Write in Vietnamese, around 45 to 60 words, with a friendly buyer-focused tone. "
+                + "The description should help the seller present the item clearly and mention only that the seller "
+                + "can add missing specifications before publishing. Do not ask buyers to contact or message anyone. "
+                + "If the condition is only 'Used', treat it as previously owned only; do not say the item works well, "
+                + "looks good, or is in good condition unless that exact detail was provided. "
+                + "Important constraints: the image classifier only suggests the product category. It does not "
+                + "verify brand, model, size, working condition, sound quality, visual quality, accessories, "
+                + "warranty, defects, or delivery details. If a detail is unknown, phrase it as something the seller "
+                + "should review or add before publishing, not as a confirmed fact.";
+    }
+
+    private String buildProductDescriptionPriceLine(ProductDescriptionRequest request) {
+        if (request.getPrice().signum() == 0) {
+            return "- Price: not provided by the seller yet. Do not mention price in the description.";
+        }
+        return "- Price: " + request.getPrice().stripTrailingZeros().toPlainString() + " VND";
     }
 
     private void validateProductDescriptionRequest(ProductDescriptionRequest request) {
