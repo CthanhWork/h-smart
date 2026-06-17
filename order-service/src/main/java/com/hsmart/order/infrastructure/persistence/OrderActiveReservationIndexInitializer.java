@@ -18,6 +18,12 @@ public class OrderActiveReservationIndexInitializer implements ApplicationRunner
             where status in ('PENDING', 'PROCESSING')
             """;
 
+    private static final String RECREATE_DELIVERY_METHOD_CHECK_SQL = """
+            alter table orders drop constraint if exists orders_delivery_method_check;
+            alter table orders add constraint orders_delivery_method_check
+            check (delivery_method in ('GHTK', 'VIETTEL_POST'))
+            """;
+
     private final JdbcTemplate jdbcTemplate;
 
     @Override
@@ -27,6 +33,13 @@ public class OrderActiveReservationIndexInitializer implements ApplicationRunner
             log.info("Ensured active order reservation index exists");
         } catch (RuntimeException exception) {
             log.warn("Could not create active order reservation index. Service-level validation remains active", exception);
+        }
+
+        try {
+            jdbcTemplate.execute(RECREATE_DELIVERY_METHOD_CHECK_SQL);
+            log.info("Ensured order delivery method check constraint supports configured providers");
+        } catch (RuntimeException exception) {
+            log.warn("Could not refresh order delivery method check constraint", exception);
         }
     }
 }
