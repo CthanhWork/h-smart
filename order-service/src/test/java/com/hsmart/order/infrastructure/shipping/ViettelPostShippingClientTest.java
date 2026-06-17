@@ -23,12 +23,12 @@ class ViettelPostShippingClientTest {
 
     @Test
     void calculateShippingFeeShouldLoginAndParseMoneyTotal() {
-        RestClient.Builder builder = RestClient.builder().baseUrl("https://partnerdev.viettelpost.vn");
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://partner2.viettelpost.vn");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         ViettelPostShippingClient client = new ViettelPostShippingClient(builder.build(), properties());
 
         expectLogin(server);
-        server.expect(requestTo("https://partnerdev.viettelpost.vn/v2/order/getPriceNlp"))
+        server.expect(requestTo("https://partner2.viettelpost.vn/v2/order/getPriceNlp"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(header("Token", "viettel-token"))
                 .andExpect(content().json("""
@@ -59,12 +59,12 @@ class ViettelPostShippingClientTest {
 
     @Test
     void createShipmentShouldLoginAndReturnOrderNumber() {
-        RestClient.Builder builder = RestClient.builder().baseUrl("https://partnerdev.viettelpost.vn");
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://partner2.viettelpost.vn");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         ViettelPostShippingClient client = new ViettelPostShippingClient(builder.build(), properties());
 
         expectLogin(server);
-        server.expect(requestTo("https://partnerdev.viettelpost.vn/v2/order/createOrderNlp"))
+        server.expect(requestTo("https://partner2.viettelpost.vn/v2/order/createOrderNlp"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(header("Token", "viettel-token"))
                 .andExpect(content().json("""
@@ -107,11 +107,11 @@ class ViettelPostShippingClientTest {
 
     @Test
     void createShipmentShouldFailClearlyWhenCredentialsAreMissing() {
-        RestClient.Builder builder = RestClient.builder().baseUrl("https://partnerdev.viettelpost.vn");
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://partner2.viettelpost.vn");
         ViettelPostShippingClient client = new ViettelPostShippingClient(
                 builder.build(),
                 new ViettelPostProperties(
-                        "https://partnerdev.viettelpost.vn",
+                        "https://partner2.viettelpost.vn",
                         "",
                         "",
                         2000,
@@ -139,12 +139,12 @@ class ViettelPostShippingClientTest {
 
     @Test
     void calculateShippingFeeShouldWrapProviderResponseWithoutFee() {
-        RestClient.Builder builder = RestClient.builder().baseUrl("https://partnerdev.viettelpost.vn");
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://partner2.viettelpost.vn");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
         ViettelPostShippingClient client = new ViettelPostShippingClient(builder.build(), properties());
 
         expectLogin(server);
-        server.expect(requestTo("https://partnerdev.viettelpost.vn/v2/order/getPriceNlp"))
+        server.expect(requestTo("https://partner2.viettelpost.vn/v2/order/getPriceNlp"))
                 .andExpect(method(HttpMethod.POST))
                 .andRespond(withSuccess(
                         "{\"status\":500,\"message\":\"Fee is unavailable\"}",
@@ -161,7 +161,7 @@ class ViettelPostShippingClientTest {
     }
 
     private void expectLogin(MockRestServiceServer server) {
-        server.expect(requestTo("https://partnerdev.viettelpost.vn/v2/user/Login"))
+        server.expect(requestTo("https://partner2.viettelpost.vn/v2/user/Login"))
                 .andExpect(method(HttpMethod.POST))
                 .andExpect(content().json("""
                         {
@@ -189,7 +189,7 @@ class ViettelPostShippingClientTest {
 
     private ViettelPostProperties properties() {
         return new ViettelPostProperties(
-                "https://partnerdev.viettelpost.vn",
+                "https://partner2.viettelpost.vn",
                 "viettel-user",
                 "viettel-password",
                 2000,

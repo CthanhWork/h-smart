@@ -2387,3 +2387,12 @@
   - `mvn -q test` passed for `order-service`
   - `mvn -q test` passed for `api-gateway`
   - `npm run build` passed for the frontend UI
+
+[2026-06-18] Viettel Post production partner endpoint configured
+
+- Updated Viettel Post defaults from `https://partnerdev.viettelpost.vn` to `https://partner2.viettelpost.vn`.
+- Partner credentials were verified against `POST /v2/user/Login`; production partner endpoints return a token, while the dev endpoint rejects the same account.
+- GCP `.env` was updated with the Viettel Post partner endpoint and credentials, then `order-service` and `api-gateway` were restarted.
+- Verified guest shipping estimate through API Gateway:
+  - `GET /api/v1/orders/shipping-estimate/guest?productId=58&deliveryMethod=VIETTEL_POST&province=Ho%20Chi%20Minh%20City&district=District%201`
+  - Response returned `200 OK` with a Viettel Post shipping fee.

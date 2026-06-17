@@ -51,7 +51,7 @@ ghtk:
   webhook-hash: ${GHTK_WEBHOOK_HASH:}
 
 viettel-post:
-  api-url: ${VIETTEL_POST_API_URL:https://partnerdev.viettelpost.vn}
+  api-url: ${VIETTEL_POST_API_URL:https://partner2.viettelpost.vn}
   username: ${VIETTEL_POST_USERNAME:}
   password: ${VIETTEL_POST_PASSWORD:}
   connect-timeout-ms: ${VIETTEL_POST_CONNECT_TIMEOUT_MS:2000}
