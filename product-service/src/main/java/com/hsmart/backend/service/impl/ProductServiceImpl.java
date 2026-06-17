@@ -237,6 +237,16 @@ public class ProductServiceImpl implements ProductService {
         Product product = getActiveProduct(id);
         ProductStatus previousStatus = product.getStatus();
 
+        if (shouldSkipModerationDowngrade(previousStatus, status)) {
+            log.info(
+                    "Skipped moderation status downgrade for product {} from {} to {}",
+                    product.getId(),
+                    previousStatus,
+                    status
+            );
+            return toProductResponse(product);
+        }
+
         product.setStatus(status);
         Product savedProduct = productRepository.save(product);
         publishProductUpdatedAfterCommit(savedProduct);
@@ -344,6 +354,11 @@ public class ProductServiceImpl implements ProductService {
 
     private boolean isTransitionToSold(ProductStatus previousStatus, ProductStatus currentStatus) {
         return previousStatus != ProductStatus.SOLD && currentStatus == ProductStatus.SOLD;
+    }
+
+    private boolean shouldSkipModerationDowngrade(ProductStatus previousStatus, ProductStatus requestedStatus) {
+        return requestedStatus == ProductStatus.PENDING_REVIEW
+                && (previousStatus == ProductStatus.APPROVED || previousStatus == ProductStatus.SOLD);
     }
 
     private String getRootCauseMessage(Throwable exception) {

@@ -232,10 +232,11 @@ services:
     environment:
       SERVER_PORT: "8761"
       EUREKA_INSTANCE_HOSTNAME: discovery-server
+      SPRING_PROFILES_ACTIVE: observability
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
-      LOGSTASH_HOST: logstash
-      LOGSTASH_PORT: "5044"
+      LOGGING_LOGSTASH_HOST: logstash
+      LOGGING_LOGSTASH_PORT: "5044"
     ports:
       - "8761:8761"
     healthcheck:
@@ -270,10 +271,11 @@ services:
       MAIL_STARTTLS_ENABLE: ${MAIL_STARTTLS_ENABLE:-false}
       MAIL_FROM: ${MAIL_FROM:-no-reply@hsmart.local}
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:5173}
+      SPRING_PROFILES_ACTIVE: observability
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
-      LOGSTASH_HOST: logstash
-      LOGSTASH_PORT: "5044"
+      LOGGING_LOGSTASH_HOST: logstash
+      LOGGING_LOGSTASH_PORT: "5044"
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
       INTERNAL_SHARED_SECRET: ${INTERNAL_SHARED_SECRET:?Set INTERNAL_SHARED_SECRET in .env or shell before starting Docker Compose}
     depends_on:
@@ -316,10 +318,11 @@ services:
       SPRING_RABBITMQ_USERNAME: hsmart
       SPRING_RABBITMQ_PASSWORD: hsmart_password
       STORAGE_UPLOAD_DIR: /app/uploads
+      SPRING_PROFILES_ACTIVE: observability
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
-      LOGSTASH_HOST: logstash
-      LOGSTASH_PORT: "5044"
+      LOGGING_LOGSTASH_HOST: logstash
+      LOGGING_LOGSTASH_PORT: "5044"
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
       INTERNAL_SHARED_SECRET: ${INTERNAL_SHARED_SECRET:?Set INTERNAL_SHARED_SECRET in .env or shell before starting Docker Compose}
     depends_on:
@@ -354,10 +357,11 @@ services:
       SPRING_RABBITMQ_PORT: "5672"
       SPRING_RABBITMQ_USERNAME: hsmart
       SPRING_RABBITMQ_PASSWORD: hsmart_password
+      SPRING_PROFILES_ACTIVE: observability
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
-      LOGSTASH_HOST: logstash
-      LOGSTASH_PORT: "5044"
+      LOGGING_LOGSTASH_HOST: logstash
+      LOGGING_LOGSTASH_PORT: "5044"
       AI_PROVIDER_URL: ${AI_PROVIDER_URL:-https://api.openai.com/v1}
       AI_PROVIDER_API_KEY: ${AI_PROVIDER_API_KEY:?Set AI_PROVIDER_API_KEY in .env or shell before starting Docker Compose}
       AI_PROVIDER_MODEL: ${AI_PROVIDER_MODEL:?Set AI_PROVIDER_MODEL in .env or shell before starting Docker Compose}
@@ -412,10 +416,11 @@ services:
       SPRING_RABBITMQ_PORT: "5672"
       SPRING_RABBITMQ_USERNAME: hsmart
       SPRING_RABBITMQ_PASSWORD: hsmart_password
+      SPRING_PROFILES_ACTIVE: observability
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
-      LOGSTASH_HOST: logstash
-      LOGSTASH_PORT: "5044"
+      LOGGING_LOGSTASH_HOST: logstash
+      LOGGING_LOGSTASH_PORT: "5044"
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
       INTERNAL_SHARED_SECRET: ${INTERNAL_SHARED_SECRET:?Set INTERNAL_SHARED_SECRET in .env or shell before starting Docker Compose}
     depends_on:
@@ -476,10 +481,11 @@ services:
       VIETTEL_POST_PRODUCT_TYPE: ${VIETTEL_POST_PRODUCT_TYPE:-HH}
       VIETTEL_POST_ORDER_PAYMENT: ${VIETTEL_POST_ORDER_PAYMENT:-3}
       VIETTEL_POST_CHECK_UNIQUE: ${VIETTEL_POST_CHECK_UNIQUE:-true}
+      SPRING_PROFILES_ACTIVE: observability
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
-      LOGSTASH_HOST: logstash
-      LOGSTASH_PORT: "5044"
+      LOGGING_LOGSTASH_HOST: logstash
+      LOGGING_LOGSTASH_PORT: "5044"
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
       INTERNAL_SHARED_SECRET: ${INTERNAL_SHARED_SECRET:?Set INTERNAL_SHARED_SECRET in .env or shell before starting Docker Compose}
     depends_on:
@@ -520,10 +526,11 @@ services:
       ORDER_SERVICE_BASE_URL: http://order-service
       ORDER_SERVICE_CONNECT_TIMEOUT_MS: "2000"
       ORDER_SERVICE_READ_TIMEOUT_MS: "3000"
+      SPRING_PROFILES_ACTIVE: observability
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
-      LOGSTASH_HOST: logstash
-      LOGSTASH_PORT: "5044"
+      LOGGING_LOGSTASH_HOST: logstash
+      LOGGING_LOGSTASH_PORT: "5044"
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
       INTERNAL_SHARED_SECRET: ${INTERNAL_SHARED_SECRET:?Set INTERNAL_SHARED_SECRET in .env or shell before starting Docker Compose}
     depends_on:
@@ -554,10 +561,11 @@ services:
       SERVER_PORT: "8000"
       AI_SERVICE_URL: http://ai-service:8000
       JWT_SECRET: UFdHZG1lU3Q2UTNYV2lBc1pDajFuWWtFaWpNd2pmd0h6aFZ4T3V0bE1YQU5SVEtrQ1VGVW9vV1h6S1J4bw==
+      SPRING_PROFILES_ACTIVE: observability
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
-      LOGSTASH_HOST: logstash
-      LOGSTASH_PORT: "5044"
+      LOGGING_LOGSTASH_HOST: logstash
+      LOGGING_LOGSTASH_PORT: "5044"
       GATEWAY_RESPONSE_TIMEOUT: 120s
       SPRING_DATA_REDIS_HOST: redis
       SPRING_DATA_REDIS_PORT: "6379"

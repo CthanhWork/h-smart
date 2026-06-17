@@ -10,30 +10,38 @@
         </encoder>
     </appender>
 
-    <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
-        <destination>${LOGSTASH_HOST}:${LOGSTASH_PORT}</destination>
-        <connectionTimeout>500 milliseconds</connectionTimeout>
-        <reconnectionDelay>5 seconds</reconnectionDelay>
-        <shutdownGracePeriod>0 seconds</shutdownGracePeriod>
-        <daemon>true</daemon>
-        <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
-            <providers>
-                <timestamp>
-                    <timeZone>UTC</timeZone>
-                </timestamp>
-                <version/>
-                <pattern>
-                    <pattern>{"service":"${APP_NAME}","environment":"dev","level":"%level","logger":"%logger","thread":"%thread","traceId":"%X{traceId:-}","spanId":"%X{spanId:-}"}</pattern>
-                </pattern>
-                <message/>
-                <arguments/>
-                <stackTrace/>
-            </providers>
-        </encoder>
-    </appender>
+    <springProfile name="!observability">
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
 
-    <root level="INFO">
-        <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="LOGSTASH"/>
-    </root>
+    <springProfile name="observability">
+        <appender name="LOGSTASH" class="net.logstash.logback.appender.LogstashTcpSocketAppender">
+            <destination>${LOGSTASH_HOST}:${LOGSTASH_PORT}</destination>
+            <connectionTimeout>500 milliseconds</connectionTimeout>
+            <reconnectionDelay>5 seconds</reconnectionDelay>
+            <shutdownGracePeriod>0 seconds</shutdownGracePeriod>
+            <daemon>true</daemon>
+            <encoder class="net.logstash.logback.encoder.LoggingEventCompositeJsonEncoder">
+                <providers>
+                    <timestamp>
+                        <timeZone>UTC</timeZone>
+                    </timestamp>
+                    <version/>
+                    <pattern>
+                        <pattern>{"service":"${APP_NAME}","environment":"dev","level":"%level","logger":"%logger","thread":"%thread","traceId":"%X{traceId:-}","spanId":"%X{spanId:-}"}</pattern>
+                    </pattern>
+                    <message/>
+                    <arguments/>
+                    <stackTrace/>
+                </providers>
+            </encoder>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+            <appender-ref ref="LOGSTASH"/>
+        </root>
+    </springProfile>
 </configuration>

@@ -7,6 +7,7 @@ import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -395,6 +396,55 @@ class ProductServiceImplTest {
 
         assertThrows(org.springframework.web.server.ResponseStatusException.class,
                 () -> productService.updateProduct(12L, request));
+    }
+
+    @Test
+    void updateModerationStatusShouldNotDowngradeApprovedProductToPendingReview() {
+        Product product = Product.builder()
+                .id(16L)
+                .title("Approved chair")
+                .description("Clean chair")
+                .price(BigDecimal.valueOf(250000))
+                .status(ProductStatus.APPROVED)
+                .sellerId("seller-1")
+                .aiMetadata("[]")
+                .imageUrls("[]")
+                .build();
+
+        when(productRepository.findByIdAndIsDeletedFalse(16L)).thenReturn(Optional.of(product));
+
+        ProductResponseDTO result = productService.updateModerationStatus(16L, ProductStatus.PENDING_REVIEW);
+
+        Assertions.assertEquals(ProductStatus.APPROVED, product.getStatus());
+        Assertions.assertEquals(ProductStatus.APPROVED, result.getStatus());
+        verify(productRepository, never()).save(any(Product.class));
+        verify(productEventPublisher, never()).publishProductUpdated(any());
+    }
+
+    @Test
+    void updateModerationStatusShouldStillAllowManualHideAfterApproval() {
+        Product product = Product.builder()
+                .id(17L)
+                .title("Approved desk")
+                .description("Clean desk")
+                .price(BigDecimal.valueOf(350000))
+                .status(ProductStatus.APPROVED)
+                .sellerId("seller-1")
+                .aiMetadata("[]")
+                .imageUrls("[]")
+                .build();
+
+        when(productRepository.findByIdAndIsDeletedFalse(17L)).thenReturn(Optional.of(product));
+        when(productRepository.save(product)).thenReturn(product);
+
+        ProductResponseDTO result = productService.updateModerationStatus(17L, ProductStatus.HIDDEN);
+
+        Assertions.assertEquals(ProductStatus.HIDDEN, product.getStatus());
+        Assertions.assertEquals(ProductStatus.HIDDEN, result.getStatus());
+        verify(productRepository).save(product);
+        verify(productEventPublisher).publishProductUpdated(argThat(event ->
+                event.getId().equals(17L) && event.getStatus().equals("HIDDEN")
+        ));
     }
 
     @Test
