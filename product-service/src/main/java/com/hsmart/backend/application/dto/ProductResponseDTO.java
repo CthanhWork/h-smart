@@ -20,6 +20,8 @@ public class ProductResponseDTO {
     private BigDecimal price;
     private ProductStatus status;
     private String sellerId;
+    private String sellerDistrict;
+    private String sellerProvince;
     private Long categoryId;
     private String categoryName;
     private String imageUrl;

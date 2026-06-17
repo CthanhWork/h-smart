@@ -2339,3 +2339,51 @@
   - shipment creation through `/v2/order/createOrderNlp`
 - Added Viettel Post environment variables to Docker Compose and GCP Compose without hardcoding partner credentials.
 - Updated the frontend checkout modal and orders page to show only GHTK and Viettel Post delivery methods.
+
+[2026-06-18] marketplace product detail UX upgraded with offers, shipping estimate, and buyer assurance
+
+- Added buyer offer support in `order-service`:
+  - `POST /api/v1/orders/offers`
+  - `GET /api/v1/orders/offers`
+- Offers are stored in `product_offers`, start as `PENDING`, and expire automatically after 24 hours.
+- Buyers can send quick percentage-based offers; the frontend currently exposes `5%`, `10%`, and `15%` presets.
+- Duplicate active offers from the same buyer for the same product are rejected.
+- `order-service` sends a `PRODUCT_OFFER` notification to the seller through `interaction-service`; notification delivery failure is logged and does not roll back offer creation.
+- Added pre-checkout shipping estimate support:
+  - `GET /api/v1/orders/shipping-estimate?productId={id}&deliveryMethod={method}`
+- Shipping estimate calls the selected provider (`GHTK` or `VIETTEL_POST`) using buyer and seller structured addresses and returns `shippingFee`, `productPrice`, `estimatedTotal`, `sellerDistrict`, and `sellerProvince`.
+- `product-service` now enriches product responses with `sellerDistrict` and `sellerProvince` by calling the internal user address endpoint without exposing street-level seller address data.
+- Updated the frontend product detail page with:
+  - large `H-Smart Bảo Đảm` badge for approved listings
+  - seller district/province display
+  - estimated shipping fee below the price area
+  - `Trả giá` modal with 5/10/15 percent offer presets
+  - sticky mobile bottom action bar for `Chat ngay`, `Trả giá`, and `Mua ngay`
+- Verified:
+  - `mvn -q test` passed for `order-service`
+  - `mvn -q test` passed for `product-service`
+  - `npm run build` passed for the frontend UI
+
+[2026-06-18] offer lifecycle and discounted checkout completed
+
+- Added seller offer decision APIs in `order-service`:
+  - `POST /api/v1/orders/offers/{id}/accept`
+  - `POST /api/v1/orders/offers/{id}/reject`
+  - `POST /api/v1/orders/offers/{id}/cancel`
+- Buyers can cancel only `PENDING` offers, and sellers can accept or reject only `PENDING` offers.
+- Added lowball protection: offer discounts above `30%` are rejected with `400 Bad Request`.
+- Added optional `offerId` to order creation so accepted offers can be used during checkout.
+- Checkout validates that the offer belongs to the buyer, belongs to the selected product, is `ACCEPTED`, and has not expired.
+- Orders created from an accepted offer use `offerPrice + shippingFee` as the real order amount.
+- Accepted offers used for checkout are marked `ORDERED` to prevent reuse.
+- When an order is created for a product, all other active offers for that product are cancelled and buyers are notified that the product is no longer available.
+- Carrier shipment COD now uses the actual order amount, and shipment product value uses the discounted product amount when an accepted offer was used.
+- Updated frontend:
+  - added an offer center to the orders page for sent and received offers
+  - added accept, reject, cancel, and discounted checkout actions
+  - added offer rich cards inside the chat conversation view
+  - added guest shipping estimate from product detail by selecting province and district
+- Verified:
+  - `mvn -q test` passed for `order-service`
+  - `mvn -q test` passed for `api-gateway`
+  - `npm run build` passed for the frontend UI

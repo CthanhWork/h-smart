@@ -34,6 +34,7 @@ import com.hsmart.backend.infrastructure.persistence.ProductLikeRepository;
 import com.hsmart.backend.infrastructure.persistence.ProductRepository;
 import com.hsmart.backend.presentation.controllers.ProductController;
 import com.hsmart.backend.service.ProductService;
+import com.hsmart.backend.service.UserAddressClient;
 import com.hsmart.backend.service.VisionService;
 import java.io.IOException;
 import java.math.BigDecimal;
@@ -80,6 +81,9 @@ class ProductServiceImplTest {
     @Mock
     private ProductEventPublisher productEventPublisher;
 
+    @Mock
+    private UserAddressClient userAddressClient;
+
     private ProductServiceImpl productService;
 
     @BeforeEach
@@ -94,8 +98,12 @@ class ProductServiceImplTest {
                 new ApplicationProperties("http://localhost:8000"),
                 productMapper,
                 new ProductNamingSupport(),
-                productEventPublisher
+                productEventPublisher,
+                userAddressClient
         );
+        org.mockito.Mockito.lenient()
+                .when(userAddressClient.getUserAddress(anyString()))
+                .thenReturn(Optional.empty());
         org.mockito.Mockito.lenient()
                 .when(productMapper.toResponse(any(Product.class), anyList(), eq("http://localhost:8000")))
                 .thenAnswer(invocation -> {

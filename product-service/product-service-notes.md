@@ -15,6 +15,7 @@ Current business scope:
 - AI metadata persistence returned from `ai-service`
 - Smart Naming image analysis endpoint for upload previews
 - Smart Pricing suggestions backed by Redis average sold price cache
+- seller district and province enrichment for product detail/listing responses
 - ownership validation based on `X-User-Id` forwarded by `api-gateway`
 - asynchronous product lifecycle events through RabbitMQ
 - asynchronous order completion consumption through RabbitMQ
@@ -66,6 +67,8 @@ This microservice owns one dedicated database:
 - database name: `hsmart_product_db`
 
 There is no direct database dependency on `user-service`, `api-gateway`, or `ai-service`.
+
+`product-service` may call `user-service` through its internal address endpoint to enrich product responses with seller district and province. This supports local marketplace UX without exposing the seller's full street address. If the lookup fails, the product response is still returned and the location fields remain empty.
 
 ## Domain Model
 

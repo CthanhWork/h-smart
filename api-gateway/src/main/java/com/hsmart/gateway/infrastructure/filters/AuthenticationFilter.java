@@ -38,6 +38,7 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
             "/api/v1/locations/**",
             "/api/v1/products/media/**",
             "/api/v1/search/**",
+            "/api/v1/orders/shipping-estimate/guest",
             "/api/v1/orders/internal/ghtk-webhook",
             "/health",
             "/v3/api-docs/**",

@@ -304,6 +304,7 @@ services:
       AI_SERVICE_CONNECT_TIMEOUT_MS: "2000"
       AI_SERVICE_READ_TIMEOUT_MS: "60000"
       INTERACTION_SERVICE_BASE_URL: http://interaction-service:8083
+      USER_SERVICE_BASE_URL: http://user-service:8081
       SPRING_DATASOURCE_URL: jdbc:postgresql://product-postgres-db:5432/hsmart_product_db
       SPRING_DATASOURCE_USERNAME: hsmart
       SPRING_DATASOURCE_PASSWORD: hsmart_password
@@ -454,6 +455,9 @@ services:
       USER_SERVICE_BASE_URL: http://user-service
       USER_SERVICE_CONNECT_TIMEOUT_MS: "2000"
       USER_SERVICE_READ_TIMEOUT_MS: "3000"
+      INTERACTION_SERVICE_BASE_URL: http://interaction-service
+      INTERACTION_SERVICE_CONNECT_TIMEOUT_MS: "2000"
+      INTERACTION_SERVICE_READ_TIMEOUT_MS: "3000"
       GHTK_API_URL: ${GHTK_API_URL:-https://services.giaohangtietkiem.vn}
       GHTK_API_TOKEN: ${GHTK_API_TOKEN:-}
       GHTK_CONNECT_TIMEOUT_MS: "2000"

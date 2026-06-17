@@ -46,6 +46,8 @@ services:
     read-timeout-ms: ${AI_SERVICE_READ_TIMEOUT_MS:60000}
   interaction:
     base-url: ${INTERACTION_SERVICE_BASE_URL:http://localhost:8083}
+  user:
+    base-url: ${USER_SERVICE_BASE_URL:http://localhost:8081}
 pricing:
   average-refresh-cron: ${PRICING_AVERAGE_REFRESH_CRON:0 0 * * * *}
 storage:

@@ -8,22 +8,30 @@ import static org.mockito.BDDMockito.given;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.when;
 
 import com.hsmart.order.application.dto.CreateOrderRequestDTO;
+import com.hsmart.order.application.dto.CreateOfferRequestDTO;
 import com.hsmart.order.application.dto.GhtkShipmentRequestDTO;
 import com.hsmart.order.application.dto.GhtkWebhookRequestDTO;
+import com.hsmart.order.application.dto.OfferResponseDTO;
 import com.hsmart.order.application.dto.OrderResponseDTO;
 import com.hsmart.order.application.dto.ProductResponseDTO;
+import com.hsmart.order.application.dto.ShippingEstimateResponseDTO;
 import com.hsmart.order.application.dto.UserAddressResponseDTO;
 import com.hsmart.order.application.exceptions.InvalidGhtkWebhookException;
 import com.hsmart.order.application.exceptions.ShippingProviderUnavailableException;
 import com.hsmart.order.domain.entities.DeliveryMethod;
+import com.hsmart.order.domain.entities.OfferStatus;
 import com.hsmart.order.domain.entities.Order;
 import com.hsmart.order.domain.entities.OrderStatus;
+import com.hsmart.order.domain.entities.ProductOffer;
 import com.hsmart.order.infrastructure.config.GhtkProperties;
 import com.hsmart.order.infrastructure.messaging.OrderEventPublisher;
 import com.hsmart.order.infrastructure.persistence.OrderRepository;
+import com.hsmart.order.infrastructure.persistence.ProductOfferRepository;
 import com.hsmart.order.service.GhtkClient;
+import com.hsmart.order.service.NotificationClient;
 import com.hsmart.order.service.ProductClient;
 import com.hsmart.order.service.ViettelPostClient;
 import com.hsmart.order.service.UserClient;
@@ -44,6 +52,9 @@ class OrderServiceImplTest {
     private OrderRepository orderRepository;
 
     @Mock
+    private ProductOfferRepository productOfferRepository;
+
+    @Mock
     private ProductClient productClient;
 
     @Mock
@@ -58,19 +69,25 @@ class OrderServiceImplTest {
     @Mock
     private OrderEventPublisher orderEventPublisher;
 
+    @Mock
+    private NotificationClient notificationClient;
+
     private OrderServiceImpl orderService;
 
     @BeforeEach
     void setUp() {
         orderService = new OrderServiceImpl(
                 orderRepository,
+                productOfferRepository,
                 productClient,
                 userClient,
                 java.util.List.of(ghtkClient, viettelPostClient),
                 orderEventPublisher,
-                ghtkProperties()
+                ghtkProperties(),
+                notificationClient
         );
         lenient().when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(productOfferRepository.save(any(ProductOffer.class))).thenAnswer(invocation -> invocation.getArgument(0));
         lenient().when(ghtkClient.deliveryMethod()).thenReturn(DeliveryMethod.GHTK);
         lenient().when(viettelPostClient.deliveryMethod()).thenReturn(DeliveryMethod.VIETTEL_POST);
     }
@@ -211,6 +228,106 @@ class OrderServiceImplTest {
     }
 
     @Test
+    void estimateShippingShouldReturnProviderFeeAndSellerLocation() {
+        UserAddressResponseDTO sellerAddress = address("seller-one", "District 1");
+        UserAddressResponseDTO buyerAddress = address("buyer-one", "Thu Duc City");
+        given(productClient.getProduct(10L, "buyer-one")).willReturn(product());
+        given(userClient.getUserAddress("seller-one")).willReturn(sellerAddress);
+        given(userClient.getUserAddress("buyer-one")).willReturn(buyerAddress);
+        given(ghtkClient.calculateShippingFee(sellerAddress, buyerAddress)).willReturn(BigDecimal.valueOf(30000));
+
+        ShippingEstimateResponseDTO response = orderService.estimateShipping(10L, DeliveryMethod.GHTK, "buyer-one");
+
+        assertThat(response.getShippingFee()).isEqualByComparingTo("30000");
+        assertThat(response.getEstimatedTotal()).isEqualByComparingTo("130000");
+        assertThat(response.getSellerDistrict()).isEqualTo("District 1");
+    }
+
+    @Test
+    void createOfferShouldCalculateDiscountedOfferPrice() {
+        given(productClient.getProduct(10L, "buyer-one")).willReturn(product());
+        when(productOfferRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        OfferResponseDTO response = orderService.createOffer(
+                CreateOfferRequestDTO.builder()
+                        .productId(10L)
+                        .discountPercent(10)
+                        .build(),
+                "buyer-one"
+        );
+
+        assertThat(response.getOfferPrice()).isEqualByComparingTo("90000");
+        assertThat(response.getDiscountPercent()).isEqualTo(10);
+        assertThat(response.getSellerId()).isEqualTo("seller-one");
+    }
+
+    @Test
+    void createOfferShouldRejectDuplicateActiveOfferFromSameBuyer() {
+        given(productClient.getProduct(10L, "buyer-one")).willReturn(product());
+        given(productOfferRepository.existsByProductIdAndBuyerIdAndStatusIn(eq(10L), eq("buyer-one"), any()))
+                .willReturn(true);
+
+        assertThatThrownBy(() -> orderService.createOffer(
+                CreateOfferRequestDTO.builder()
+                        .productId(10L)
+                        .discountPercent(10)
+                        .build(),
+                "buyer-one"
+        ))
+                .isInstanceOf(com.hsmart.order.application.exceptions.OrderStateException.class)
+                .hasMessage("Buyer already has an active offer for this product");
+    }
+
+    @Test
+    void createOfferShouldRejectDiscountAboveThirtyPercent() {
+        given(productClient.getProduct(10L, "buyer-one")).willReturn(product());
+
+        assertThatThrownBy(() -> orderService.createOffer(
+                CreateOfferRequestDTO.builder()
+                        .productId(10L)
+                        .discountPercent(31)
+                        .build(),
+                "buyer-one"
+        ))
+                .isInstanceOf(com.hsmart.order.application.exceptions.OrderStateException.class)
+                .hasMessage("Offer discount cannot exceed 30 percent");
+    }
+
+    @Test
+    void acceptOfferShouldMovePendingOfferToAccepted() {
+        ProductOffer offer = productOffer(OfferStatus.PENDING);
+        given(productOfferRepository.findById(77L)).willReturn(java.util.Optional.of(offer));
+
+        OfferResponseDTO response = orderService.acceptOffer(77L, "seller-one");
+
+        assertThat(response.getStatus()).isEqualTo(OfferStatus.ACCEPTED);
+        verify(notificationClient).sendOfferAcceptedNotification(any());
+    }
+
+    @Test
+    void createOrderShouldUseAcceptedOfferPriceAndMarkOfferAsOrdered() {
+        UserAddressResponseDTO sellerAddress = address("seller-one", "District 1");
+        UserAddressResponseDTO buyerAddress = address("buyer-one", "Thu Duc City");
+        ProductOffer offer = productOffer(OfferStatus.ACCEPTED);
+        given(productClient.getProduct(10L, "buyer-one")).willReturn(product());
+        given(userClient.getUserAddress("seller-one")).willReturn(sellerAddress);
+        given(userClient.getUserAddress("buyer-one")).willReturn(buyerAddress);
+        given(ghtkClient.calculateShippingFee(sellerAddress, buyerAddress)).willReturn(BigDecimal.valueOf(30000));
+        given(productOfferRepository.findById(77L)).willReturn(java.util.Optional.of(offer));
+        given(productOfferRepository.findByProductIdAndStatusIn(eq(10L), any())).willReturn(java.util.List.of());
+        CreateOrderRequestDTO request = CreateOrderRequestDTO.builder()
+                .productId(10L)
+                .offerId(77L)
+                .build();
+
+        OrderResponseDTO response = orderService.createOrder(request, "buyer-one");
+
+        assertThat(response.getProductAmount()).isEqualByComparingTo("85000");
+        assertThat(response.getAmount()).isEqualByComparingTo("115000");
+        assertThat(offer.getStatus()).isEqualTo(OfferStatus.ORDERED);
+    }
+
+    @Test
     void createOrderShouldRejectProductThatIsOnlyActive() {
         given(productClient.getProduct(10L, "buyer-one")).willReturn(activeProduct());
 
@@ -275,11 +392,13 @@ class OrderServiceImplTest {
     void createOrderShouldRejectSelectedProviderWhenClientIsNotConfigured() {
         orderService = new OrderServiceImpl(
                 orderRepository,
+                productOfferRepository,
                 productClient,
                 userClient,
                 java.util.List.of(ghtkClient),
                 orderEventPublisher,
-                ghtkProperties()
+                ghtkProperties(),
+                notificationClient
         );
         given(productClient.getProduct(10L, "buyer-one")).willReturn(product());
         CreateOrderRequestDTO request = CreateOrderRequestDTO.builder()
@@ -446,6 +565,20 @@ class OrderServiceImplTest {
                 .amount(BigDecimal.valueOf(130000))
                 .shippingFee(BigDecimal.valueOf(30000))
                 .status(OrderStatus.PENDING)
+                .build();
+    }
+
+    private ProductOffer productOffer(OfferStatus status) {
+        return ProductOffer.builder()
+                .id(77L)
+                .productId(10L)
+                .buyerId("buyer-one")
+                .sellerId("seller-one")
+                .originalPrice(BigDecimal.valueOf(100000))
+                .offerPrice(BigDecimal.valueOf(85000))
+                .discountPercent(15)
+                .status(status)
+                .expiresAt(java.time.LocalDateTime.now().plusHours(1))
                 .build();
     }
 

@@ -22,12 +22,15 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 @Entity
-@Table(name = "orders")
-public class Order {
+@Table(name = "product_offers")
+public class ProductOffer {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(name = "product_id", nullable = false)
+    private Long productId;
 
     @Column(name = "buyer_id", nullable = false, length = 150)
     private String buyerId;
@@ -35,28 +38,21 @@ public class Order {
     @Column(name = "seller_id", nullable = false, length = 150)
     private String sellerId;
 
-    @Column(name = "product_id", nullable = false)
-    private Long productId;
+    @Column(name = "original_price", nullable = false, precision = 12, scale = 2)
+    private BigDecimal originalPrice;
 
-    @Column(nullable = false, precision = 12, scale = 2)
-    private BigDecimal amount;
+    @Column(name = "offer_price", nullable = false, precision = 12, scale = 2)
+    private BigDecimal offerPrice;
 
-    @Column(name = "product_amount", nullable = false, precision = 12, scale = 2, columnDefinition = "numeric(12,2) default 0")
-    private BigDecimal productAmount;
-
-    @Column(name = "shipping_fee", nullable = false, precision = 12, scale = 2, columnDefinition = "numeric(12,2) default 0")
-    private BigDecimal shippingFee;
-
-    @Column(name = "tracking_code", length = 100)
-    private String trackingCode;
-
-    @Enumerated(EnumType.STRING)
-    @Column(name = "delivery_method", nullable = false, length = 30, columnDefinition = "varchar(30) default 'GHTK'")
-    private DeliveryMethod deliveryMethod;
+    @Column(name = "discount_percent", nullable = false)
+    private Integer discountPercent;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
-    private OrderStatus status;
+    private OfferStatus status;
+
+    @Column(name = "expires_at", nullable = false)
+    private LocalDateTime expiresAt;
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
@@ -70,16 +66,7 @@ public class Order {
         createdAt = now;
         updatedAt = now;
         if (status == null) {
-            status = OrderStatus.PENDING;
-        }
-        if (shippingFee == null) {
-            shippingFee = BigDecimal.ZERO;
-        }
-        if (productAmount == null && amount != null) {
-            productAmount = amount.subtract(shippingFee);
-        }
-        if (deliveryMethod == null) {
-            deliveryMethod = DeliveryMethod.GHTK;
+            status = OfferStatus.PENDING;
         }
     }
 

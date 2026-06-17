@@ -36,6 +36,11 @@ user-service:
   connect-timeout-ms: ${USER_SERVICE_CONNECT_TIMEOUT_MS:2000}
   read-timeout-ms: ${USER_SERVICE_READ_TIMEOUT_MS:3000}
 
+interaction-service:
+  base-url: ${INTERACTION_SERVICE_BASE_URL:http://interaction-service}
+  connect-timeout-ms: ${INTERACTION_SERVICE_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${INTERACTION_SERVICE_READ_TIMEOUT_MS:3000}
+
 ghtk:
   api-url: ${GHTK_API_URL:https://services.giaohangtietkiem.vn}
   api-token: ${GHTK_API_TOKEN:}

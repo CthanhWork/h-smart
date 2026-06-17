@@ -19,6 +19,8 @@ public class CreateOrderRequestDTO {
     @Builder.Default
     private DeliveryMethod deliveryMethod = DeliveryMethod.GHTK;
 
+    private Long offerId;
+
     public CreateOrderRequestDTO(Long productId) {
         this.productId = productId;
         this.deliveryMethod = DeliveryMethod.GHTK;

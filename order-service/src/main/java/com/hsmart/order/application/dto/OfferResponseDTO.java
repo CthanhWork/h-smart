@@ -1,7 +1,6 @@
 package com.hsmart.order.application.dto;
 
-import com.hsmart.order.domain.entities.DeliveryMethod;
-import com.hsmart.order.domain.entities.OrderStatus;
+import com.hsmart.order.domain.entities.OfferStatus;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import lombok.AllArgsConstructor;
@@ -13,17 +12,16 @@ import lombok.NoArgsConstructor;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class OrderResponseDTO {
+public class OfferResponseDTO {
     private Long id;
+    private Long productId;
     private String buyerId;
     private String sellerId;
-    private Long productId;
-    private BigDecimal amount;
-    private BigDecimal productAmount;
-    private BigDecimal shippingFee;
-    private String trackingCode;
-    private DeliveryMethod deliveryMethod;
-    private OrderStatus status;
+    private BigDecimal originalPrice;
+    private BigDecimal offerPrice;
+    private Integer discountPercent;
+    private OfferStatus status;
+    private LocalDateTime expiresAt;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

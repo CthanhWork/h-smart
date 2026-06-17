@@ -10,6 +10,7 @@ import com.hsmart.backend.application.dto.ProductResponseDTO;
 import com.hsmart.backend.application.dto.ProductSearchEvent;
 import com.hsmart.backend.application.dto.ProductSoldEvent;
 import com.hsmart.backend.application.dto.ProductStatsResponseDTO;
+import com.hsmart.backend.application.dto.UserAddressResponseDTO;
 import com.hsmart.backend.application.exceptions.AiServiceTimeoutException;
 import com.hsmart.backend.application.exceptions.AiServiceUnavailableException;
 import com.hsmart.backend.application.exceptions.CategoryNotFoundException;
@@ -31,6 +32,7 @@ import com.hsmart.backend.infrastructure.persistence.CategoryRepository;
 import com.hsmart.backend.infrastructure.persistence.ProductLikeRepository;
 import com.hsmart.backend.infrastructure.persistence.ProductRepository;
 import com.hsmart.backend.service.ProductService;
+import com.hsmart.backend.service.UserAddressClient;
 import com.hsmart.backend.service.VisionService;
 import java.io.IOException;
 import java.io.InputStream;
@@ -75,6 +77,7 @@ public class ProductServiceImpl implements ProductService {
     private final ProductMapper productMapper;
     private final ProductNamingSupport productNamingSupport;
     private final ProductEventPublisher productEventPublisher;
+    private final UserAddressClient userAddressClient;
 
     @Override
     public ProductResponseDTO createProduct(
@@ -481,7 +484,14 @@ public class ProductServiceImpl implements ProductService {
         List<String> imageUrls = parseImageUrls(product.getId(), product.getImageUrls());
         ProductResponseDTO response = productMapper.toResponse(product, aiMetadata, applicationProperties.publicBaseUrl());
         response.setImageUrls(toAbsoluteImageUrls(imageUrls, response.getImageUrl(), applicationProperties.publicBaseUrl()));
+        userAddressClient.getUserAddress(product.getSellerId())
+                .ifPresent(address -> enrichSellerLocation(response, address));
         return response;
+    }
+
+    private void enrichSellerLocation(ProductResponseDTO response, UserAddressResponseDTO address) {
+        response.setSellerDistrict(address.district());
+        response.setSellerProvince(address.province());
     }
 
     private List<DetectionDTO> parseAiMetadata(Long productId, String aiMetadataJson) {
