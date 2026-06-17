@@ -17,12 +17,12 @@ public class CreateOrderRequestDTO {
     private Long productId;
 
     @Builder.Default
-    private DeliveryMethod deliveryMethod = DeliveryMethod.GHTK;
+    private DeliveryMethod deliveryMethod = DeliveryMethod.VIETTEL_POST;
 
     private Long offerId;
 
     public CreateOrderRequestDTO(Long productId) {
         this.productId = productId;
-        this.deliveryMethod = DeliveryMethod.GHTK;
+        this.deliveryMethod = DeliveryMethod.VIETTEL_POST;
     }
 }

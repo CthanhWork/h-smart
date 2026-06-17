@@ -183,7 +183,7 @@ class OrderServiceImplTest {
         given(userClient.getUserAddress("buyer-one")).willReturn(buyerAddress);
         given(ghtkClient.calculateShippingFee(sellerAddress, buyerAddress)).willReturn(BigDecimal.valueOf(30000));
 
-        OrderResponseDTO response = orderService.createOrder(new CreateOrderRequestDTO(10L), "buyer-one");
+        OrderResponseDTO response = orderService.createOrder(ghtkOrderRequest(10L), "buyer-one");
 
         assertThat(response.getShippingFee()).isEqualByComparingTo("30000");
         assertThat(response.getAmount()).isEqualByComparingTo("130000");
@@ -200,7 +200,7 @@ class OrderServiceImplTest {
         given(ghtkClient.calculateShippingFee(sellerAddress, buyerAddress))
                 .willThrow(new IllegalStateException("GHTK is unavailable"));
 
-        assertThatThrownBy(() -> orderService.createOrder(new CreateOrderRequestDTO(10L), "buyer-one"))
+        assertThatThrownBy(() -> orderService.createOrder(ghtkOrderRequest(10L), "buyer-one"))
                 .isInstanceOf(ShippingProviderUnavailableException.class)
                 .hasMessage("Shipping fee calculation failed");
     }
@@ -317,6 +317,7 @@ class OrderServiceImplTest {
         given(productOfferRepository.findByProductIdAndStatusIn(eq(10L), any())).willReturn(java.util.List.of());
         CreateOrderRequestDTO request = CreateOrderRequestDTO.builder()
                 .productId(10L)
+                .deliveryMethod(DeliveryMethod.GHTK)
                 .offerId(77L)
                 .build();
 
@@ -331,7 +332,7 @@ class OrderServiceImplTest {
     void createOrderShouldRejectProductThatIsOnlyActive() {
         given(productClient.getProduct(10L, "buyer-one")).willReturn(activeProduct());
 
-        assertThatThrownBy(() -> orderService.createOrder(new CreateOrderRequestDTO(10L), "buyer-one"))
+        assertThatThrownBy(() -> orderService.createOrder(ghtkOrderRequest(10L), "buyer-one"))
                 .isInstanceOf(com.hsmart.order.application.exceptions.ProductUnavailableException.class)
                 .hasMessage("Product is not available for ordering");
     }
@@ -349,7 +350,7 @@ class OrderServiceImplTest {
     void createOrderShouldRejectProductWithMissingSellerInformation() {
         given(productClient.getProduct(10L, "buyer-one")).willReturn(productWithSeller(null));
 
-        assertThatThrownBy(() -> orderService.createOrder(new CreateOrderRequestDTO(10L), "buyer-one"))
+        assertThatThrownBy(() -> orderService.createOrder(ghtkOrderRequest(10L), "buyer-one"))
                 .isInstanceOf(com.hsmart.order.application.exceptions.ProductUnavailableException.class)
                 .hasMessage("Product seller information is missing");
     }
@@ -383,7 +384,7 @@ class OrderServiceImplTest {
         given(ghtkClient.calculateShippingFee(sellerAddress, buyerAddress)).willReturn(BigDecimal.valueOf(30000));
         given(orderRepository.save(any(Order.class))).willThrow(new DataIntegrityViolationException("duplicate active order"));
 
-        assertThatThrownBy(() -> orderService.createOrder(new CreateOrderRequestDTO(10L), "buyer-one"))
+        assertThatThrownBy(() -> orderService.createOrder(ghtkOrderRequest(10L), "buyer-one"))
                 .isInstanceOf(com.hsmart.order.application.exceptions.ProductUnavailableException.class)
                 .hasMessage("Product already has an active order");
     }
@@ -564,7 +565,15 @@ class OrderServiceImplTest {
                 .productId(10L)
                 .amount(BigDecimal.valueOf(130000))
                 .shippingFee(BigDecimal.valueOf(30000))
+                .deliveryMethod(DeliveryMethod.GHTK)
                 .status(OrderStatus.PENDING)
+                .build();
+    }
+
+    private CreateOrderRequestDTO ghtkOrderRequest(Long productId) {
+        return CreateOrderRequestDTO.builder()
+                .productId(productId)
+                .deliveryMethod(DeliveryMethod.GHTK)
                 .build();
     }
 

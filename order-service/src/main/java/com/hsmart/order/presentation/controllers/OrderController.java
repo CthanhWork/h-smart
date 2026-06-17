@@ -57,7 +57,7 @@ public class OrderController {
     @GetMapping("/shipping-estimate")
     public ResponseEntity<ApiResponse<ShippingEstimateResponseDTO>> estimateShipping(
             @RequestParam Long productId,
-            @RequestParam(defaultValue = "GHTK") DeliveryMethod deliveryMethod,
+            @RequestParam(defaultValue = "VIETTEL_POST") DeliveryMethod deliveryMethod,
             @RequestHeader(value = "X-User-Id", required = false) String buyerId
     ) {
         ShippingEstimateResponseDTO response = orderService.estimateShipping(
@@ -71,7 +71,7 @@ public class OrderController {
     @GetMapping("/shipping-estimate/guest")
     public ResponseEntity<ApiResponse<ShippingEstimateResponseDTO>> estimateGuestShipping(
             @RequestParam Long productId,
-            @RequestParam(defaultValue = "GHTK") DeliveryMethod deliveryMethod,
+            @RequestParam(defaultValue = "VIETTEL_POST") DeliveryMethod deliveryMethod,
             @RequestParam String province,
             @RequestParam String district
     ) {

@@ -478,11 +478,11 @@ public class OrderServiceImpl implements OrderService {
     }
 
     private DeliveryMethod resolveDeliveryMethod(CreateOrderRequestDTO request) {
-        return request.getDeliveryMethod() != null ? request.getDeliveryMethod() : DeliveryMethod.GHTK;
+        return request.getDeliveryMethod() != null ? request.getDeliveryMethod() : DeliveryMethod.VIETTEL_POST;
     }
 
     private ShippingProviderClient resolveShippingProvider(DeliveryMethod deliveryMethod) {
-        DeliveryMethod resolvedDeliveryMethod = deliveryMethod != null ? deliveryMethod : DeliveryMethod.GHTK;
+        DeliveryMethod resolvedDeliveryMethod = deliveryMethod != null ? deliveryMethod : DeliveryMethod.VIETTEL_POST;
         return shippingProviderClients.stream()
                 .filter(client -> client.deliveryMethod() == resolvedDeliveryMethod)
                 .findFirst()

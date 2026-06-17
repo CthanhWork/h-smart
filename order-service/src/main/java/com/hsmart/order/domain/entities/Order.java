@@ -51,7 +51,7 @@ public class Order {
     private String trackingCode;
 
     @Enumerated(EnumType.STRING)
-    @Column(name = "delivery_method", nullable = false, length = 30, columnDefinition = "varchar(30) default 'GHTK'")
+    @Column(name = "delivery_method", nullable = false, length = 30, columnDefinition = "varchar(30) default 'VIETTEL_POST'")
     private DeliveryMethod deliveryMethod;
 
     @Enumerated(EnumType.STRING)
@@ -79,7 +79,7 @@ public class Order {
             productAmount = amount.subtract(shippingFee);
         }
         if (deliveryMethod == null) {
-            deliveryMethod = DeliveryMethod.GHTK;
+            deliveryMethod = DeliveryMethod.VIETTEL_POST;
         }
     }
 
