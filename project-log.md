@@ -2396,3 +2396,4 @@
 - Verified guest shipping estimate through API Gateway:
   - `GET /api/v1/orders/shipping-estimate/guest?productId=58&deliveryMethod=VIETTEL_POST&province=Ho%20Chi%20Minh%20City&district=District%201`
   - Response returned `200 OK` with a Viettel Post shipping fee.
+- Checkout and shipping-estimate defaults were switched to `VIETTEL_POST` for the demo environment because Viettel Post partner credentials are available, while GHTK remains selectable when its token is configured.
