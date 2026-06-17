@@ -138,6 +138,20 @@ The laptop must:
 - allow inbound TCP `8002` on the Tailscale interface
 - remain awake while GCP needs AI inference
 
+On Windows with Docker Engine inside WSL, start the AI runtime with:
+
+```powershell
+cd D:\H-smart
+powershell -ExecutionPolicy Bypass -File .\scripts\start-ai-wsl.ps1
+```
+
+The script:
+
+- starts the existing `h-smart-ai-service` container
+- applies the `unless-stopped` restart policy
+- keeps the WSL distribution alive
+- waits until Detectron2 reports a healthy model
+
 Find the laptop Tailscale IPv4 address:
 
 ```bash
@@ -150,14 +164,38 @@ Test from the GCP VPS:
 curl --fail http://<IP-Tailscale-Laptop>:8002/health
 ```
 
-Test from a temporary Docker container:
+Docker containers may not have a working route to the VPS Tailscale interface. Run the repository TCP relay on the VPS:
 
 ```bash
-docker run --rm curlimages/curl:8.12.1 \
-  --fail http://<IP-Tailscale-Laptop>:8002/health
+cd ~/h-smart
+nohup ./scripts/start-ai-proxy.sh <IP-Tailscale-Laptop> \
+  > /tmp/hsmart-ai-proxy.log 2>&1 &
 ```
 
-The container-level check is important because `product-service` and `api-gateway` call the Tailscale address from inside Docker.
+Verify the relay from the VPS:
+
+```bash
+curl --fail http://127.0.0.1:18002/health
+```
+
+The GCP Compose file maps `host.docker.internal` to the Docker host gateway. Verify the complete container path:
+
+```bash
+docker compose -f docker-compose-gcp.yml exec product-service \
+  curl --fail http://host.docker.internal:18002/health
+```
+
+To start the relay automatically after a VPS reboot:
+
+```bash
+crontab -e
+```
+
+Add one line and replace the placeholder IP:
+
+```cron
+@reboot sleep 20 && cd /home/<VPS-USER>/h-smart && nohup ./scripts/start-ai-proxy.sh <IP-Tailscale-Laptop> > /tmp/hsmart-ai-proxy.log 2>&1 &
+```
 
 Official Tailscale reference:
 
@@ -197,7 +235,7 @@ Use URL-safe passwords for MongoDB because its credentials are embedded in a con
 Example:
 
 ```dotenv
-EXTERNAL_AI_SERVICE_URL=http://<IP-Tailscale-Laptop>:8002
+EXTERNAL_AI_SERVICE_URL=http://host.docker.internal:18002
 PUBLIC_API_BASE_URL=http://<GCP-EXTERNAL-IP>:8000
 
 INTERNAL_SHARED_SECRET=<GENERATE_A_LONG_RANDOM_SECRET>
@@ -381,6 +419,15 @@ Follow logs:
 
 ```bash
 docker compose -f docker-compose-gcp.yml logs -f --tail=200
+```
+
+Verify the hybrid AI path after either machine restarts:
+
+```bash
+curl --fail http://<IP-Tailscale-Laptop>:8002/health
+curl --fail http://127.0.0.1:18002/health
+docker compose -f docker-compose-gcp.yml exec product-service \
+  curl --fail http://host.docker.internal:18002/health
 ```
 
 Stop containers without deleting data:

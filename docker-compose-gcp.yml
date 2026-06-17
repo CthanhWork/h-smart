@@ -305,6 +305,8 @@ services:
         condition: service_healthy
     volumes:
       - product-uploads:/app/uploads
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       <<: *spring-healthcheck
       test:
@@ -574,6 +576,8 @@ services:
         condition: service_healthy
     ports:
       - "8000:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     healthcheck:
       <<: *spring-healthcheck
       test: ["CMD-SHELL", "curl -fsS http://localhost:8000/health || exit 1"]
