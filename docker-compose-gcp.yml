@@ -544,6 +544,7 @@ services:
       <<: *spring-environment
       JAVA_OPTS: "-Xms512m -Xmx512m -Dresilience4j.timelimiter.instances.assistantCircuitBreaker.timeoutDuration=${ASSISTANT_CIRCUIT_BREAKER_TIMEOUT:-60s} -Dresilience4j.timelimiter.instances.assistantCircuitBreaker.cancelRunningFuture=false"
       SERVER_PORT: "8000"
+      APP_CORS_ALLOWED_ORIGIN_PATTERNS: ${APP_CORS_ALLOWED_ORIGIN_PATTERNS:-http://localhost:3000,http://localhost:5173,https://hsmart.thatcherdev.id.vn,https://instance-20260601-031713.tail0e1958.ts.net}
       AI_SERVICE_URL: ${EXTERNAL_AI_SERVICE_URL:?EXTERNAL_AI_SERVICE_URL is required}
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       GATEWAY_RESPONSE_TIMEOUT: ${GATEWAY_RESPONSE_TIMEOUT:-120s}

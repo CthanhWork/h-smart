@@ -2397,3 +2397,10 @@
   - `GET /api/v1/orders/shipping-estimate/guest?productId=58&deliveryMethod=VIETTEL_POST&province=Ho%20Chi%20Minh%20City&district=District%201`
   - Response returned `200 OK` with a Viettel Post shipping fee.
 - Checkout and shipping-estimate defaults were switched to `VIETTEL_POST` for the demo environment because Viettel Post partner credentials are available, while GHTK remains selectable when its token is configured.
+
+[2026-06-18] production frontend domain enabled for API Gateway CORS
+
+- Updated `api-gateway` CORS configuration to use environment-driven allowed origin patterns instead of a hardcoded wildcard.
+- Added the deployed Vercel frontend domain `https://hsmart.thatcherdev.id.vn` to the default allowed origins, while keeping local development origins and the Tailscale demo origin.
+- Added `PATCH` to the allowed CORS methods and exposed `Authorization` and `Location` headers for frontend API flows.
+- Added an API Gateway unit test that verifies browser preflight requests from the production frontend origin are accepted.
