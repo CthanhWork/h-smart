@@ -1,7 +1,7 @@
 # Models
 
-Place the trained Detectron2 checkpoint here:
+Place the trained YOLO checkpoint here:
 
-- `model.pth`
+- `household_yolo26n_best.pt`
 
 Large model weights should not be committed to git.

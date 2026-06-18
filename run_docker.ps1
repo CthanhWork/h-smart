@@ -29,7 +29,7 @@ $ComposeFile = Join-Path $ProjectRoot "docker-compose.yml"
 $ModelsDir = Join-Path $ProjectRoot "ai-service\\models"
 
 $RequiredFiles = @(
-    (Join-Path $ModelsDir "model.pth")
+    (Join-Path $ModelsDir "household_yolo26n_best.pt")
 )
 
 Write-Step "Checking Docker Compose"

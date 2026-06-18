@@ -23,7 +23,7 @@ def get_settings() -> Settings:
     return Settings(
         root_dir=root_dir,
         model_dir=model_dir,
-        model_path=Path(os.getenv("AI_MODEL_PATH", model_dir / "model.pth")),
+        model_path=Path(os.getenv("AI_MODEL_PATH", model_dir / "household_yolo26n_best.pt")),
         score_threshold=float(os.getenv("AI_SCORE_THRESHOLD", "0.4")),
         device=os.getenv("AI_DEVICE") or "cpu",
         demo_mode=os.getenv("AI_DEMO_MODE", "false").lower() in {"1", "true", "yes", "on"},

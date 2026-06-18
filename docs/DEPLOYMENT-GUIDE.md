@@ -15,7 +15,7 @@ The current demo deployment uses a hybrid multi-cloud architecture:
   - Elasticsearch
 - DigitalOcean AI VPS:
   - FastAPI `ai-service`
-  - Detectron2 CPU inference
+  - YOLO CPU inference
   - Public port `8002` restricted to the GCP public IPv4 address
 
 The laptop and Tailscale relay remain documented as a fallback development mode.
@@ -153,7 +153,7 @@ The script:
 - starts the existing `h-smart-ai-service` container
 - applies the `unless-stopped` restart policy
 - keeps the WSL distribution alive
-- waits until Detectron2 reports a healthy model
+- waits until the YOLO inference service reports a healthy model
 
 Find the laptop Tailscale IPv4 address:
 
@@ -222,7 +222,7 @@ The deployed architecture becomes:
 GCP API Gateway and product-service
     -> DigitalOcean public IPv4 port 8002
     -> Docker ai-service
-    -> Detectron2 CPU inference
+    -> YOLO CPU inference
 ```
 
 Install Docker on the AI VPS:
@@ -247,7 +247,7 @@ Copy these files to `/opt/hsmart-ai`:
 
 - `docker-compose-ai-do.yml` as `docker-compose.yml`
 - the built `h-smart-ai-service:latest` Docker image
-- `model.pth`, `classes.json`, and `config_infer.yaml` under `models/`
+- `household_yolo26n_best.pt` under `models/`
 
 Start the service:
 

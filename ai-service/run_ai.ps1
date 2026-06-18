@@ -40,7 +40,7 @@ $RequirementsFile = Join-Path $ProjectRoot "requirements.txt"
 
 Write-Step "Checking model artifacts"
 $RequiredFiles = @(
-    (Join-Path $ModelsDir "model.pth")
+    (Join-Path $ModelsDir "household_yolo26n_best.pt")
 )
 
 $MissingFiles = @()

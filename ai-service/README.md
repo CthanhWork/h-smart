@@ -1,14 +1,14 @@
 # AI Service
 
-FastAPI service for Detectron2 household object detection.
+FastAPI service for YOLO household object detection.
 
 ## Models
 
-Place the trained Detectron2 checkpoint in `models/`:
+Place the trained YOLO checkpoint in `models/`:
 
-- `model.pth`
+- `household_yolo26n_best.pt`
 
-The service uses the built-in Detectron2 `LVISv1-InstanceSegmentation/mask_rcnn_R_50_FPN_1x.yaml` base config and the 53-class label map in code.
+The service uses the 20-class Open Images household model trained with Ultralytics YOLO.
 
 ## Local run
 

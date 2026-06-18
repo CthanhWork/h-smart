@@ -9,7 +9,10 @@ services:
     cpus: 4.0
     environment:
       AI_MODEL_DIR: /app/models
+      AI_MODEL_PATH: /app/models/household_yolo26n_best.pt
       AI_SCORE_THRESHOLD: "0.4"
+      AI_DEVICE: cpu
+      YOLO_CONFIG_DIR: /tmp
       WEB_CONCURRENCY: "1"
       GUNICORN_THREADS: "2"
       GUNICORN_TIMEOUT: "180"

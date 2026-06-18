@@ -2412,3 +2412,14 @@
   - 100 completed order reviews across demo buyer and seller accounts.
   - Updated seller trust scores and review counts for demo seller profiles.
 - Updated product image URL handling so externally hosted absolute image URLs are returned unchanged instead of being prefixed with the API public base URL.
+
+[2026-06-18] DigitalOcean AI service upgraded to the retrained YOLO model
+
+- Replaced the Detectron2 inference adapter with an Ultralytics YOLO detector while preserving the existing `/api/v1/predict` response contract.
+- Deployed `household_yolo26n_best.pt` to the DigitalOcean AI host with CPU inference and a `0.4` confidence threshold.
+- Retained the previous Detectron2 image and model artifacts on the AI host for rollback.
+- Verified the new model:
+  - DigitalOcean health endpoint reports the Ultralytics YOLO architecture and loaded model.
+  - Direct inference recognized an office chair with `0.8849` confidence.
+  - GCP can reach the DigitalOcean AI endpoint.
+  - Product Service image analysis through API Gateway returned the expected Vietnamese suggestion and AI metadata.

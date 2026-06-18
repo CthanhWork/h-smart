@@ -3,24 +3,19 @@ FROM python:3.9-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
     curl \
-    g++ \
-    git \
     libgl1 \
     libglib2.0-0 \
-    ninja-build \
     libsm6 \
     libxext6 \
     libxrender1 \
-    libxrender-dev \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --upgrade "pip<26" "setuptools<81" wheel packaging \
     && pip install --no-cache-dir "numpy<2" \
     && pip install --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu torch==2.1.2+cpu torchvision==0.16.2+cpu \
-    && pip install --no-cache-dir --no-build-isolation -r requirements.txt
+    && pip install --no-cache-dir -r requirements.txt
 
 COPY app ./app
 
