@@ -2,7 +2,7 @@
 
 ## 1. Deployment Architecture
 
-The first GCP deployment uses a hybrid architecture:
+The current demo deployment uses a hybrid multi-cloud architecture:
 
 - GCP VPS:
   - API Gateway
@@ -13,9 +13,12 @@ The first GCP deployment uses a hybrid architecture:
   - Redis
   - RabbitMQ
   - Elasticsearch
-- Local laptop:
+- DigitalOcean AI VPS:
   - FastAPI `ai-service`
-  - Tailscale provides the private network path from GCP to the laptop
+  - Detectron2 CPU inference
+  - Public port `8002` restricted to the GCP public IPv4 address
+
+The laptop and Tailscale relay remain documented as a fallback development mode.
 
 The GCP Compose file does not include:
 
@@ -200,6 +203,101 @@ Add one line and replace the placeholder IP:
 Official Tailscale reference:
 
 - https://tailscale.com/docs/install/linux
+
+## 5.1. Recommended Demo Mode: Dedicated DigitalOcean AI VPS
+
+For a more reliable demonstration, run `ai-service` on a separate CPU VPS instead of a laptop.
+
+Recommended minimum resources:
+
+- Ubuntu 24.04
+- 4 vCPU
+- 8 GB RAM
+- 40 GB SSD
+- 4 GB swap
+
+The deployed architecture becomes:
+
+```text
+GCP API Gateway and product-service
+    -> DigitalOcean public IPv4 port 8002
+    -> Docker ai-service
+    -> Detectron2 CPU inference
+```
+
+Install Docker on the AI VPS:
+
+```bash
+curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+sudo sh /tmp/get-docker.sh
+sudo systemctl enable --now docker
+```
+
+Create swap:
+
+```bash
+sudo fallocate -l 4G /swapfile
+sudo chmod 600 /swapfile
+sudo mkswap /swapfile
+sudo swapon /swapfile
+echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
+```
+
+Copy these files to `/opt/hsmart-ai`:
+
+- `docker-compose-ai-do.yml` as `docker-compose.yml`
+- the built `h-smart-ai-service:latest` Docker image
+- `model.pth`, `classes.json`, and `config_infer.yaml` under `models/`
+
+Start the service:
+
+```bash
+cd /opt/hsmart-ai
+docker compose up -d
+curl --fail http://127.0.0.1:8002/health
+```
+
+Restrict port `8002` to the GCP public IPv4 address. Replace the placeholder:
+
+```bash
+GCP_PUBLIC_IP="<GCP-PUBLIC-IP>"
+
+sudo iptables -I DOCKER-USER 1 \
+  -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
+sudo iptables -I DOCKER-USER 2 \
+  -p tcp -s "${GCP_PUBLIC_IP}/32" \
+  -m conntrack --ctorigdstport 8002 -j ACCEPT
+sudo iptables -A DOCKER-USER \
+  -p tcp -m conntrack --ctorigdstport 8002 -j DROP
+```
+
+Install persistence and save the rules:
+
+```bash
+sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
+sudo netfilter-persistent save
+```
+
+Verify that GCP can access the service:
+
+```bash
+curl --fail http://<DIGITALOCEAN-PUBLIC-IP>:8002/health
+```
+
+Configure the GCP `.env`:
+
+```dotenv
+EXTERNAL_AI_SERVICE_URL=http://<DIGITALOCEAN-PUBLIC-IP>:8002
+```
+
+Apply the change:
+
+```bash
+docker compose -f docker-compose-gcp.yml up -d --force-recreate \
+  product-service api-gateway
+```
+
+DigitalOcean promotional credits are temporary. Destroy the Droplet when it is no longer needed to stop billing.
 
 ## 6. Upload the Repository
 
