@@ -2423,3 +2423,9 @@
   - Direct inference recognized an office chair with `0.8849` confidence.
   - GCP can reach the DigitalOcean AI endpoint.
   - Product Service image analysis through API Gateway returned the expected Vietnamese suggestion and AI metadata.
+
+[2026-06-18] product description suggestions changed to publish-ready output
+
+- Updated the Interaction Service product description prompt to return a complete Vietnamese sales paragraph that can be published immediately.
+- Removed prompt instructions that asked sellers to verify or supplement missing specifications.
+- Added server-side output validation that replaces editorial or incomplete AI responses with a safe, publish-ready fallback without inventing technical details.
