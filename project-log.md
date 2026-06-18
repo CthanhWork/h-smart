@@ -2404,3 +2404,11 @@
 - Added the deployed Vercel frontend domain `https://hsmart.thatcherdev.id.vn` to the default allowed origins, while keeping local development origins and the Tailscale demo origin.
 - Added `PATCH` to the allowed CORS methods and exposed `Authorization` and `Location` headers for frontend API flows.
 - Added an API Gateway unit test that verifies browser preflight requests from the production frontend origin are accepted.
+
+[2026-06-18] report demo marketplace dataset expanded
+
+- Seeded the GCP demo environment with additional report-ready data:
+  - 100 approved or sold product listings with realistic household item titles, prices, seller districts, and product images.
+  - 100 completed order reviews across demo buyer and seller accounts.
+  - Updated seller trust scores and review counts for demo seller profiles.
+- Updated product image URL handling so externally hosted absolute image URLs are returned unchanged instead of being prefixed with the API public base URL.

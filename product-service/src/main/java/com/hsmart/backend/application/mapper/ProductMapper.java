@@ -60,6 +60,10 @@ public interface ProductMapper {
             return imageUrl;
         }
 
+        if (imageUrl.startsWith("http://") || imageUrl.startsWith("https://")) {
+            return imageUrl;
+        }
+
         if (!StringUtils.hasText(publicBaseUrl)) {
             return imageUrl;
         }
