@@ -2429,3 +2429,87 @@
 - Updated the Interaction Service product description prompt to return a complete Vietnamese sales paragraph that can be published immediately.
 - Removed prompt instructions that asked sellers to verify or supplement missing specifications.
 - Added server-side output validation that replaces editorial or incomplete AI responses with a safe, publish-ready fallback without inventing technical details.
+
+[2026-06-20] Admin operational gaps filled: unban, user management, order management, review moderation
+
+- Scope:
+  - Filled four critical admin operational gaps across admin-service, user-service, order-service, and review-service
+  - No gateway routing changes required (all new admin endpoints fall under existing `/api/v1/admin/**` route)
+
+- Unban user (quick win):
+  - Added `POST /api/v1/admin/users/{userId}/unban` to `admin-service`
+  - Reuses existing `PUT /api/v1/users/internal/{userId}/status` with `isActive: true`
+  - Symmetric to the existing ban endpoint; admin can now restore access without needing to call the internal endpoint directly
+
+- User management:
+  - Added `GET /api/v1/users/internal/admin/list?search=&isActive=&page=&size=` to `user-service`
+  - Added `GET /api/v1/users/internal/admin/{userId}` to `user-service`
+  - Added JPQL query `findAllForAdmin` to `UserRepository` with optional search (username/email LIKE) and isActive filter
+  - Added `UserAdminSummaryDTO` to `user-service` (id, username, email, fullName, phoneNumber, role, active, emailVerified, trustScore, reviewCount, province, district)
+  - Added `PageResponseDTO` to `user-service`
+  - `admin-service` exposes `GET /api/v1/admin/users` and `GET /api/v1/admin/users/{userId}` by delegating to user-service internal endpoints
+  - Added `listUsers` and `getUserById` to `UserAdminClient` and `UserServiceAdminClient`
+  - Added `UserAdminSummaryDTO` and `PageResponseDTO` to `admin-service`
+
+- Order management:
+  - Added `GET /api/v1/orders/internal/admin/list?status=&page=&size=` to `order-service`
+  - Added `POST /api/v1/orders/internal/admin/{orderId}/cancel` to `order-service` (bypasses buyer/seller ownership check)
+  - Admin cancel rejects already COMPLETED or CANCELLED orders
+  - Added JPQL `findAllForAdmin` to `OrderRepository` with optional status filter, sorted by `createdAt DESC`
+  - Added `PageResponseDTO` to `order-service`
+  - `admin-service` exposes `GET /api/v1/admin/orders` and `POST /api/v1/admin/orders/{orderId}/cancel`
+  - Added `OrderAdminClient`, `OrderServiceAdminClient`, and `OrderResponseDTO` to `admin-service`
+  - Added `reviewServiceRestClient` to `DownstreamClientConfig`
+
+- Review moderation:
+  - Added `hidden` boolean field (column `is_hidden`, default `false`) to `Review` entity in `review-service`
+  - Updated `getSellerReviews` to exclude hidden reviews (renamed repository method to `findAllBySellerIdAndHiddenFalseOrderByCreatedAtDesc`)
+  - Added `GET /api/v1/reviews/internal/admin/list` (paginated, all reviews including hidden)
+  - Added `POST /api/v1/reviews/internal/{reviewId}/hide`
+  - Added `POST /api/v1/reviews/internal/{reviewId}/restore`
+  - Added `ReviewNotFoundException` mapped to `404 Not Found`
+  - Added `PageResponseDTO` to `review-service`
+  - `admin-service` exposes `GET /api/v1/admin/reviews`, `POST /api/v1/admin/reviews/{reviewId}/hide`, `POST /api/v1/admin/reviews/{reviewId}/restore`
+  - Added `ReviewAdminClient`, `ReviewServiceAdminClient`, and `ReviewAdminSummaryDTO` to `admin-service`
+
+- Verification:
+  - `user-service`: 28 tests passed (26 existing + 2 new)
+  - `order-service`: 41 tests passed
+  - `review-service`: BUILD SUCCESS
+  - `admin-service`: 13 tests passed (12 existing + 1 new unban test)
+
+---
+
+[2026-06-20] interaction-service — nâng cấp LLM GĐ1→GĐ4 (branch: llm-upgrade)
+
+- Service: `interaction-service`
+- Database: `hsmart_interaction_db` (MongoDB, không thay đổi schema)
+
+**GĐ1 — Tham số sinh**
+- `CloudAssistantClient.ChatCompletionRequest`: thêm `temperature`, `max_tokens`, `frequency_penalty` với `@JsonInclude(NON_NULL)`
+- Hai preset: chat (temp=0.3, max=400, freq_pen=0.3), product-description (temp=0.7, max=200)
+- `AssistantModelClient` thêm `generateDescriptionReply()` default; `AssistantServiceImpl` dùng preset riêng cho sinh mô tả
+- Env mới: `ASSISTANT_TEMPERATURE`, `ASSISTANT_MAX_TOKENS`, `ASSISTANT_FREQUENCY_PENALTY`, `ASSISTANT_PRODUCT_DESCRIPTION_TEMPERATURE`, `ASSISTANT_PRODUCT_DESCRIPTION_MAX_TOKENS`
+
+**GĐ2 — RAG context + prompt**
+- `policy-search.page-size` 2→5; `shortText` cap 240→700 ký tự; dùng toàn bộ chunk (bỏ Math.min)
+- `buildSystemPrompt` bọc context trong `### CONTEXT ... ### END CONTEXT`
+- System prompt mặc định viết lại: quy tắc grounding + 2 few-shot ví dụ tiếng Việt
+- Env mới: `POLICY_SEARCH_PAGE_SIZE`
+
+**GĐ3 — Hybrid semantic search**
+- Thêm `EmbeddingClient` interface + `CloudEmbeddingClient` gọi `/embeddings`
+- `ElasticsearchPolicySearchClient`: khi `hybridSearchEnabled=true`, thêm `knn` clause cùng BM25; fallback về BM25 nếu embedding lỗi
+- Env mới: `ASSISTANT_EMBEDDING_MODEL`, `ASSISTANT_HYBRID_SEARCH_ENABLED` (mặc định false)
+
+**GĐ4 — Streaming + model classifier**
+- Endpoint mới: `GET /api/v1/assistant/chat/stream` → `text/event-stream` (SSE)
+- `CloudAssistantClient.generateStreamingReply()`: `stream=true`, đọc SSE line-by-line, parse `delta.content`
+- `AssistantServiceImpl.streamChat()`: async qua `CompletableFuture`, lưu hội thoại sau stream
+- `IntentClassifierProperties` thêm `model`; classifier dùng model riêng khi `ASSISTANT_INTENT_CLASSIFIER_MODEL` được cấu hình
+- Env mới: `ASSISTANT_INTENT_CLASSIFIER_MODEL`
+
+- New endpoints:
+  - `GET /api/v1/assistant/chat/stream?message=...` (SSE streaming, yêu cầu header X-User-Id)
+
+- Verification: `interaction-service`: 32 tests passed (tất cả xanh sau mỗi giai đoạn)
