@@ -18,6 +18,7 @@ import com.hsmart.backend.infrastructure.persistence.ChatMessageRepository;
 import com.hsmart.backend.service.AssistantModelClient;
 import com.hsmart.backend.service.AssistantService;
 import com.hsmart.backend.service.IntentClassifier;
+import com.hsmart.backend.service.MarketplaceScopeGuard;
 import com.hsmart.backend.service.OrderClient;
 import com.hsmart.backend.service.PolicySearchService;
 import com.hsmart.backend.service.ProductContextService;
@@ -63,6 +64,7 @@ public class AssistantServiceImpl implements AssistantService {
     private final OrderClient orderClient;
     private final PolicySearchService policySearchService;
     private final ProductContextService productContextService;
+    private final MarketplaceScopeGuard marketplaceScopeGuard;
     private final AssistantProperties assistantProperties;
     private final Tracer tracer;
 
@@ -90,6 +92,14 @@ public class AssistantServiceImpl implements AssistantService {
         Collections.reverse(history);
         log.info("Loaded {} assistant history messages for user {} with traceId {}",
                 history.size(), normalizedUserId, traceId);
+
+        if (!marketplaceScopeGuard.isInScope(normalizedMessage, history)) {
+            log.info("Rejected out-of-scope assistant request for user {} with traceId {}",
+                    normalizedUserId, traceId);
+            String outOfScopeReply = MarketplaceScopeGuard.OUT_OF_SCOPE_REPLY;
+            saveConversationTurn(normalizedUserId, normalizedMessage, outOfScopeReply);
+            return outOfScopeReply;
+        }
 
         IntentClassification classification = intentClassifier.classify(normalizedMessage);
         AssistantPromptContext promptContext = resolvePromptContext(
@@ -165,7 +175,7 @@ public class AssistantServiceImpl implements AssistantService {
 
         try {
             String generatedDescription = toPublishReadyDescription(
-                    assistantModelClient.generateReply(messages),
+                    assistantModelClient.generateDescriptionReply(messages),
                     request
             );
             log.info("Generated product description with traceId {}", traceId);

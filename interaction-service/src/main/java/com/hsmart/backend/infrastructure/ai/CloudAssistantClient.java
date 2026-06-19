@@ -1,5 +1,7 @@
 package com.hsmart.backend.infrastructure.ai;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.hsmart.backend.application.dto.AssistantChatMessage;
 import com.hsmart.backend.application.exceptions.AssistantGatewayTimeoutException;
 import com.hsmart.backend.application.exceptions.AssistantServiceUnavailableException;
@@ -30,12 +32,31 @@ public class CloudAssistantClient implements AssistantModelClient {
 
     @Override
     public String generateReply(List<AssistantChatMessage> messages) {
+        return sendRequest(messages,
+                assistantProperties.temperature(),
+                assistantProperties.maxTokens(),
+                assistantProperties.frequencyPenalty());
+    }
+
+    @Override
+    public String generateDescriptionReply(List<AssistantChatMessage> messages) {
+        return sendRequest(messages,
+                assistantProperties.productDescriptionTemperature(),
+                assistantProperties.productDescriptionMaxTokens(),
+                null);
+    }
+
+    private String sendRequest(List<AssistantChatMessage> messages,
+                               double temperature, int maxTokens, Double frequencyPenalty) {
         validateProviderConfiguration();
 
         ChatCompletionRequest request = new ChatCompletionRequest(
                 assistantProperties.model(),
                 messages,
-                false
+                false,
+                temperature,
+                maxTokens,
+                frequencyPenalty
         );
 
         try {
@@ -102,10 +123,14 @@ public class CloudAssistantClient implements AssistantModelClient {
         return false;
     }
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     private record ChatCompletionRequest(
             String model,
             List<AssistantChatMessage> messages,
-            boolean stream
+            boolean stream,
+            Double temperature,
+            @JsonProperty("max_tokens") Integer maxTokens,
+            @JsonProperty("frequency_penalty") Double frequencyPenalty
     ) {
     }
 

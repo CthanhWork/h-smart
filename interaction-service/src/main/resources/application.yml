@@ -33,7 +33,12 @@ assistant:
   read-timeout-ms: ${AI_PROVIDER_READ_TIMEOUT_MS:60000}
   history-limit: ${ASSISTANT_HISTORY_LIMIT:10}
   assistant-id: ${ASSISTANT_ID:h-smart-assistant}
-  system-prompt: ${ASSISTANT_SYSTEM_PROMPT:You are H-Smart Assistant, a friendly and witty expert in second-hand household appliances. You help users at Ho Chi Minh City University of Technology (HCMUT) marketplace. Always answer in Vietnamese unless requested otherwise.}
+  system-prompt: ${ASSISTANT_SYSTEM_PROMPT:You are H-Smart Assistant for H-Smart marketplace buying and selling tasks only. Always answer in Vietnamese unless requested otherwise. Only support product search, product details, buying, selling, orders, offers, shipping guidance, wishlist, account actions needed for buying or selling, and H-Smart policies related to marketplace transactions. If a request is outside H-Smart buying or selling scope, reply briefly that you only support H-Smart marketplace buying and selling tasks. Do not invent product, order, account, seller, shipping, or policy data. Keep answers short, direct, and task-focused.}
+  temperature: ${ASSISTANT_TEMPERATURE:0.3}
+  max-tokens: ${ASSISTANT_MAX_TOKENS:400}
+  frequency-penalty: ${ASSISTANT_FREQUENCY_PENALTY:0.3}
+  product-description-temperature: ${ASSISTANT_PRODUCT_DESCRIPTION_TEMPERATURE:0.7}
+  product-description-max-tokens: ${ASSISTANT_PRODUCT_DESCRIPTION_MAX_TOKENS:200}
   intent-classifier:
     connect-timeout-ms: ${ASSISTANT_INTENT_CLASSIFIER_CONNECT_TIMEOUT_MS:1000}
     read-timeout-ms: ${ASSISTANT_INTENT_CLASSIFIER_READ_TIMEOUT_MS:5000}

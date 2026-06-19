@@ -31,7 +31,12 @@ class ExternalRestClientConfigurationTest {
                             60_000,
                             10,
                             "assistant",
-                            "System prompt"
+                            "System prompt",
+                            0.3,
+                            400,
+                            0.3,
+                            0.7,
+                            200
                     )
             );
             context.registerBean(

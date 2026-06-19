@@ -5,4 +5,8 @@ import java.util.List;
 
 public interface AssistantModelClient {
     String generateReply(List<AssistantChatMessage> messages);
+
+    default String generateDescriptionReply(List<AssistantChatMessage> messages) {
+        return generateReply(messages);
+    }
 }

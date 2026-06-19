@@ -23,9 +23,11 @@ import com.hsmart.backend.infrastructure.config.AssistantProperties;
 import com.hsmart.backend.infrastructure.persistence.ChatMessageRepository;
 import com.hsmart.backend.service.AssistantModelClient;
 import com.hsmart.backend.service.IntentClassifier;
+import com.hsmart.backend.service.MarketplaceScopeGuard;
 import com.hsmart.backend.service.OrderClient;
 import com.hsmart.backend.service.PolicySearchService;
 import com.hsmart.backend.service.ProductContextService;
+import com.hsmart.backend.service.ProductKeywordExtractor;
 import io.micrometer.tracing.Tracer;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -58,6 +60,8 @@ class AssistantServiceImplTest {
     @Mock
     private Tracer tracer;
 
+    private final MarketplaceScopeGuard marketplaceScopeGuard = new MarketplaceScopeGuard(new ProductKeywordExtractor());
+
     @Test
     void chatShouldSendContextAndStoreConversationTurn() {
         AssistantProperties properties = new AssistantProperties(
@@ -68,7 +72,12 @@ class AssistantServiceImplTest {
                 60_000,
                 10,
                 "h-smart-assistant",
-                "You are H-Smart Assistant"
+                "You are H-Smart Assistant",
+                0.3,
+                400,
+                0.3,
+                0.7,
+                200
         );
         AssistantServiceImpl assistantService = new AssistantServiceImpl(
                 chatMessageRepository,
@@ -77,6 +86,7 @@ class AssistantServiceImplTest {
                 orderClient,
                 policySearchService,
                 productContextService,
+                marketplaceScopeGuard,
                 properties,
                 tracer
         );
@@ -275,14 +285,14 @@ class AssistantServiceImplTest {
                 .condition("Used, minor scratch")
                 .price(BigDecimal.valueOf(1500000))
                 .build();
-        when(assistantModelClient.generateReply(any())).thenReturn("- Sofa da that con dep\n- Gia hop ly");
+        when(assistantModelClient.generateDescriptionReply(any())).thenReturn("- Sofa da that con dep\n- Gia hop ly");
 
         ProductDescriptionResponse response = assistantService.generateProductDescription(request);
 
         assertEquals("Sofa da that con dep Gia hop ly", response.generatedDescription());
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<AssistantChatMessage>> promptCaptor = ArgumentCaptor.forClass(List.class);
-        verify(assistantModelClient).generateReply(promptCaptor.capture());
+        verify(assistantModelClient).generateDescriptionReply(promptCaptor.capture());
         List<AssistantChatMessage> prompt = promptCaptor.getValue();
         assertEquals(2, prompt.size());
         assertEquals("system", prompt.get(0).role());
@@ -309,7 +319,7 @@ class AssistantServiceImplTest {
                 .condition("Used")
                 .price(BigDecimal.ZERO)
                 .build();
-        when(assistantModelClient.generateReply(any())).thenReturn(
+        when(assistantModelClient.generateDescriptionReply(any())).thenReturn(
                 "Mẫu ghế đã qua sử dụng này phù hợp cho gia đình. "
                         + "Bạn vui lòng kiểm tra và bổ sung thêm kích thước, chất liệu trước khi đăng tin."
         );
@@ -367,7 +377,7 @@ class AssistantServiceImplTest {
     void generateProductDescriptionShouldReturnEmptyDescriptionWhenProviderIsUnavailable() {
         AssistantServiceImpl assistantService = newAssistantService();
         ProductDescriptionRequest request = validProductDescriptionRequest();
-        when(assistantModelClient.generateReply(any()))
+        when(assistantModelClient.generateDescriptionReply(any()))
                 .thenThrow(new AssistantServiceUnavailableException("Assistant service is unavailable"));
 
         ProductDescriptionResponse response = assistantService.generateProductDescription(request);
@@ -379,7 +389,7 @@ class AssistantServiceImplTest {
     void generateProductDescriptionShouldReturnEmptyDescriptionWhenProviderTimesOut() {
         AssistantServiceImpl assistantService = newAssistantService();
         ProductDescriptionRequest request = validProductDescriptionRequest();
-        when(assistantModelClient.generateReply(any()))
+        when(assistantModelClient.generateDescriptionReply(any()))
                 .thenThrow(new AssistantGatewayTimeoutException("Assistant service timed out", new RuntimeException()));
 
         ProductDescriptionResponse response = assistantService.generateProductDescription(request);
@@ -405,7 +415,12 @@ class AssistantServiceImplTest {
                 60_000,
                 10,
                 "h-smart-assistant",
-                "You are H-Smart Assistant"
+                "You are H-Smart Assistant",
+                0.3,
+                400,
+                0.3,
+                0.7,
+                200
         );
         return new AssistantServiceImpl(
                 chatMessageRepository,
@@ -414,8 +429,62 @@ class AssistantServiceImplTest {
                 orderClient,
                 policySearchService,
                 productContextService,
+                marketplaceScopeGuard,
                 properties,
                 tracer
         );
+    }
+
+    @Test
+    void chatShouldReturnOutOfScopeReplyWithoutCallingAssistantModel() {
+        AssistantServiceImpl assistantService = newAssistantService();
+
+        when(chatMessageRepository.findAssistantConversationHistory(
+                eq("user-1"),
+                eq("h-smart-assistant"),
+                any(Pageable.class)
+        )).thenReturn(List.of());
+
+        String reply = assistantService.chat("user-1", "Thoi tiet hom nay the nao?");
+
+        assertEquals(MarketplaceScopeGuard.OUT_OF_SCOPE_REPLY, reply);
+        verifyNoInteractions(assistantModelClient, intentClassifier, orderClient, policySearchService, productContextService);
+        verify(chatMessageRepository).saveAll(any());
+    }
+
+    @Test
+    void chatShouldTreatShortFollowUpAsInScopeWhenRecentHistoryIsMarketplaceRelated() {
+        AssistantServiceImpl assistantService = newAssistantService();
+
+        List<ChatMessage> newestFirstHistory = List.of(
+                ChatMessage.builder()
+                        .senderId("h-smart-assistant")
+                        .receiverId("user-1")
+                        .content("Hien co may giat mini va tu lanh mini.")
+                        .timestamp(Instant.parse("2026-05-02T02:00:00Z"))
+                        .build(),
+                ChatMessage.builder()
+                        .senderId("user-1")
+                        .receiverId("h-smart-assistant")
+                        .content("Co may giat nao cho phong tro khong?")
+                        .timestamp(Instant.parse("2026-05-02T01:59:00Z"))
+                        .build()
+        );
+        when(chatMessageRepository.findAssistantConversationHistory(
+                eq("user-1"),
+                eq("h-smart-assistant"),
+                any(Pageable.class)
+        )).thenReturn(newestFirstHistory);
+        when(intentClassifier.classify("Cai nao re hon?"))
+                .thenReturn(new IntentClassification(Intent.GENERAL, "Marketplace follow-up"));
+        when(productContextService.buildContext(eq("Cai nao re hon?"), eq("user-1"), any()))
+                .thenReturn(new AssistantProductContext(List.of(), "", false, 0));
+        when(assistantModelClient.generateReply(any())).thenReturn("May giat mini re hon.");
+
+        String reply = assistantService.chat("user-1", "Cai nao re hon?");
+
+        assertEquals("May giat mini re hon.", reply);
+        verify(intentClassifier).classify("Cai nao re hon?");
+        verify(assistantModelClient).generateReply(any());
     }
 }
