@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hsmart.backend.application.dto.IntentClassification;
 import com.hsmart.backend.application.dto.IntentClassification.Intent;
 import com.hsmart.backend.infrastructure.config.AssistantProperties;
+import com.hsmart.backend.infrastructure.config.IntentClassifierProperties;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.micrometer.tracing.Tracer;
@@ -119,6 +120,7 @@ class IntentClassifierTest {
                         "",
                         false
                 ),
+                new IntentClassifierProperties(1_000, 5_000, ""),
                 registry,
                 new ObjectMapper(),
                 org.mockito.Mockito.mock(Tracer.class)

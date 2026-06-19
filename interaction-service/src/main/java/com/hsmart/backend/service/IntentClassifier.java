@@ -6,6 +6,7 @@ import com.hsmart.backend.application.dto.AssistantChatMessage;
 import com.hsmart.backend.application.dto.IntentClassification;
 import com.hsmart.backend.application.dto.IntentClassification.Intent;
 import com.hsmart.backend.infrastructure.config.AssistantProperties;
+import com.hsmart.backend.infrastructure.config.IntentClassifierProperties;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
@@ -33,15 +34,17 @@ public class IntentClassifier {
     private static final String USER_ROLE = "user";
     private static final String SYSTEM_PROMPT = """
             You are the strict intent classifier for H-Smart.
+            You classify only H-Smart buying and selling assistant requests.
             Return only valid JSON. Do not return Markdown, code fences, XML, explanations, or extra text.
             The JSON format must be exactly: {"intent":"SYSTEM|POLICY|GENERAL","reason":"..."}.
             The reason must be concise English text, maximum 120 characters.
 
             Intent definitions:
-            SYSTEM: The user wants to look up orders, account information, profile information, trust score, review count, or other private H-Smart system data.
-            POLICY: The user asks about H-Smart policies, return/refund rules, buying or selling instructions, FAQ-style guidance, or platform usage rules.
-            GENERAL: The user is chatting casually or asking broad product advice that does not require private system data or policy lookup.
+            SYSTEM: The user wants to look up orders, offers, account verification state, or other private H-Smart data needed for buying or selling.
+            POLICY: The user asks about H-Smart marketplace policies, return/refund rules, shipping rules, listing rules, buying instructions, or selling instructions.
+            GENERAL: The user asks for product discovery, product comparison, buying or selling guidance, or any other request that does not require private system data or policy lookup.
 
+            If the request is unrelated to H-Smart buying or selling, choose GENERAL.
             If the request is ambiguous, choose GENERAL.
             """;
     private static final IntentClassification FALLBACK_CLASSIFICATION =
@@ -51,6 +54,7 @@ public class IntentClassifier {
     @Qualifier("intentClassifierRestClient")
     private final RestClient intentClassifierRestClient;
     private final AssistantProperties assistantProperties;
+    private final IntentClassifierProperties intentClassifierProperties;
     private final CircuitBreakerRegistry circuitBreakerRegistry;
     private final ObjectMapper objectMapper;
     private final Tracer tracer;
@@ -86,8 +90,12 @@ public class IntentClassifier {
             throw new IllegalStateException("Intent classifier AI provider configuration is incomplete");
         }
 
+        String classifierModel = StringUtils.hasText(intentClassifierProperties.model())
+                ? intentClassifierProperties.model()
+                : assistantProperties.model();
+
         ChatCompletionRequest request = new ChatCompletionRequest(
-                assistantProperties.model(),
+                classifierModel,
                 List.of(
                         new AssistantChatMessage(SYSTEM_ROLE, SYSTEM_PROMPT),
                         new AssistantChatMessage(USER_ROLE, userQuestion)

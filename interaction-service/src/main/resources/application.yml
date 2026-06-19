@@ -44,6 +44,7 @@ assistant:
   intent-classifier:
     connect-timeout-ms: ${ASSISTANT_INTENT_CLASSIFIER_CONNECT_TIMEOUT_MS:1000}
     read-timeout-ms: ${ASSISTANT_INTENT_CLASSIFIER_READ_TIMEOUT_MS:5000}
+    model: ${ASSISTANT_INTENT_CLASSIFIER_MODEL:}
 
 product-service:
   base-url: ${PRODUCT_SERVICE_BASE_URL:http://product-service}

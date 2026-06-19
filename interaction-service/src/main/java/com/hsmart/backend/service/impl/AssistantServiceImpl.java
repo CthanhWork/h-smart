@@ -24,6 +24,8 @@ import com.hsmart.backend.service.PolicySearchService;
 import com.hsmart.backend.service.ProductContextService;
 import io.micrometer.tracing.Span;
 import io.micrometer.tracing.Tracer;
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.text.NumberFormat;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -31,11 +33,15 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicReference;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Slf4j
 @Service
@@ -127,6 +133,77 @@ public class AssistantServiceImpl implements AssistantService {
         log.info("Completed assistant chat request for user {} with traceId {} in {} ms. AI response time was {} ms",
                 normalizedUserId, traceId, elapsedMillis(startedAt), aiDurationMs);
         return assistantReply;
+    }
+
+    @Override
+    public SseEmitter streamChat(String userId, String message) {
+        if (!StringUtils.hasText(userId)) {
+            throw new InvalidInteractionRequestException("userId is required");
+        }
+        if (!StringUtils.hasText(message)) {
+            throw new InvalidInteractionRequestException("message is required");
+        }
+
+        String normalizedUserId = userId.trim();
+        String normalizedMessage = message.trim();
+        String traceId = currentTraceId();
+        long streamingTimeoutMs = (long) assistantProperties.readTimeoutMs() * 2;
+        SseEmitter emitter = new SseEmitter(streamingTimeoutMs);
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                List<ChatMessage> history = new ArrayList<>(chatMessageRepository.findAssistantConversationHistory(
+                        normalizedUserId,
+                        assistantProperties.assistantId(),
+                        PageRequest.of(0, resolveHistoryLimit())
+                ));
+                Collections.reverse(history);
+
+                if (!marketplaceScopeGuard.isInScope(normalizedMessage, history)) {
+                    String outOfScopeReply = MarketplaceScopeGuard.OUT_OF_SCOPE_REPLY;
+                    emitter.send(SseEmitter.event().data(outOfScopeReply));
+                    saveConversationTurn(normalizedUserId, normalizedMessage, outOfScopeReply);
+                    emitter.complete();
+                    return;
+                }
+
+                IntentClassification classification = intentClassifier.classify(normalizedMessage);
+                AssistantPromptContext promptContext = resolvePromptContext(
+                        classification, normalizedMessage, normalizedUserId, traceId);
+                List<AssistantChatMessage> promptMessages = buildPromptMessages(
+                        history, normalizedMessage, normalizedUserId, promptContext);
+
+                AtomicBoolean emitterClosed = new AtomicBoolean(false);
+                StringBuilder fullReply = new StringBuilder();
+
+                assistantModelClient.generateStreamingReply(promptMessages, token -> {
+                    if (emitterClosed.get()) {
+                        return;
+                    }
+                    fullReply.append(token);
+                    try {
+                        emitter.send(SseEmitter.event().data(token));
+                    } catch (IOException ex) {
+                        emitterClosed.set(true);
+                        throw new UncheckedIOException(ex);
+                    }
+                }, () -> {
+                    String reply = applyRealtimeUnavailableNotice(fullReply.toString(), promptContext);
+                    saveConversationTurn(normalizedUserId, normalizedMessage, reply);
+                    if (!emitterClosed.get()) {
+                        emitter.complete();
+                    }
+                });
+            } catch (UncheckedIOException ignored) {
+                // emitter already closed
+            } catch (Exception ex) {
+                log.error("Streaming assistant chat failed for user {} with traceId {}",
+                        normalizedUserId, traceId, ex);
+                emitter.completeWithError(ex);
+            }
+        });
+
+        return emitter;
     }
 
     @Override

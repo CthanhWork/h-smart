@@ -9,6 +9,7 @@ import static org.springframework.test.web.client.match.MockRestRequestMatchers.
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withStatus;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hsmart.backend.application.dto.AssistantChatMessage;
 import com.hsmart.backend.application.exceptions.AssistantGatewayTimeoutException;
 import com.hsmart.backend.application.exceptions.AssistantServiceUnavailableException;
@@ -27,7 +28,7 @@ class CloudAssistantClientTest {
     void generateReplyShouldCallOpenAiCompatibleChatCompletionsEndpoint() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.openai.com/v1");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        CloudAssistantClient client = new CloudAssistantClient(builder.build(), properties("test-key", "gpt-test"));
+        CloudAssistantClient client = new CloudAssistantClient(builder.build(), properties("test-key", "gpt-test"), new ObjectMapper());
 
         server.expect(once(), requestTo("https://api.openai.com/v1/chat/completions"))
                 .andExpect(header("Authorization", "Bearer test-key"))
@@ -56,7 +57,8 @@ class CloudAssistantClientTest {
     void generateReplyShouldFailFastWhenApiKeyIsMissing() {
         CloudAssistantClient client = new CloudAssistantClient(
                 RestClient.builder().baseUrl("https://api.openai.com/v1").build(),
-                properties("", "gpt-test")
+                properties("", "gpt-test"),
+                new ObjectMapper()
         );
 
         assertThrows(
@@ -69,7 +71,7 @@ class CloudAssistantClientTest {
     void generateReplyShouldMapProviderGatewayTimeoutToGatewayTimeoutException() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://api.openai.com/v1");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        CloudAssistantClient client = new CloudAssistantClient(builder.build(), properties("test-key", "gpt-test"));
+        CloudAssistantClient client = new CloudAssistantClient(builder.build(), properties("test-key", "gpt-test"), new ObjectMapper());
 
         server.expect(once(), requestTo("https://api.openai.com/v1/chat/completions"))
                 .andRespond(withStatus(HttpStatus.GATEWAY_TIMEOUT));

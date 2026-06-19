@@ -12,6 +12,7 @@ import jakarta.validation.Valid;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -21,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 @RequestMapping("/api/v1/assistant")
@@ -34,6 +36,12 @@ public class AssistantController {
         String currentUserId = requireCurrentUserId();
         String response = assistantService.chat(currentUserId, request.getMessage());
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Assistant response generated successfully", response));
+    }
+
+    @GetMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
+    public SseEmitter streamChat(@RequestParam String message) {
+        String currentUserId = requireCurrentUserId();
+        return assistantService.streamChat(currentUserId, message);
     }
 
     @GetMapping("/history")

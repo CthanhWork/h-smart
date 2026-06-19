@@ -43,7 +43,7 @@ class ExternalRestClientConfigurationTest {
             );
             context.registerBean(
                     IntentClassifierProperties.class,
-                    () -> new IntentClassifierProperties(1_000, 5_000)
+                    () -> new IntentClassifierProperties(1_000, 5_000, "")
             );
             context.registerBean(
                     PolicySearchProperties.class,
