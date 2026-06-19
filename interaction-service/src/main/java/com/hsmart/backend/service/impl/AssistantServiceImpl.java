@@ -298,14 +298,14 @@ public class AssistantServiceImpl implements AssistantService {
                 "H-Smart policy context from Elasticsearch index hsmart-policy-index:"
         );
 
-        for (int index = 0; index < Math.min(2, policyChunks.size()); index++) {
+        for (int index = 0; index < policyChunks.size(); index++) {
             builder.append("\n")
                     .append(index + 1)
                     .append(". ")
                     .append(shortText(policyChunks.get(index)));
         }
 
-        builder.append("\nUse these policy entries to answer the user's question. Do not invent official rules.");
+        builder.append("\nDùng các điều khoản trên để trả lời. Không bịa quy định ngoài context.");
         return builder.toString();
     }
 
@@ -314,7 +314,10 @@ public class AssistantServiceImpl implements AssistantService {
             return assistantProperties.systemPrompt();
         }
 
-        return assistantProperties.systemPrompt() + "\n\n" + promptContext.promptAddition();
+        return assistantProperties.systemPrompt()
+                + "\n\n### CONTEXT\n"
+                + promptContext.promptAddition()
+                + "\n### END CONTEXT";
     }
 
     private String buildProductDescriptionUserPrompt(ProductDescriptionRequest request) {
@@ -420,10 +423,10 @@ public class AssistantServiceImpl implements AssistantService {
         }
 
         String normalized = value.trim().replaceAll("\\s+", " ");
-        if (normalized.length() <= 240) {
+        if (normalized.length() <= 700) {
             return normalized;
         }
-        return normalized.substring(0, 237) + "...";
+        return normalized.substring(0, 697) + "...";
     }
 
     private String fallback(Object value) {
