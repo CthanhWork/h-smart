@@ -39,6 +39,8 @@ assistant:
   frequency-penalty: ${ASSISTANT_FREQUENCY_PENALTY:0.3}
   product-description-temperature: ${ASSISTANT_PRODUCT_DESCRIPTION_TEMPERATURE:0.7}
   product-description-max-tokens: ${ASSISTANT_PRODUCT_DESCRIPTION_MAX_TOKENS:200}
+  embedding-model: ${ASSISTANT_EMBEDDING_MODEL:}
+  hybrid-search-enabled: ${ASSISTANT_HYBRID_SEARCH_ENABLED:false}
   intent-classifier:
     connect-timeout-ms: ${ASSISTANT_INTENT_CLASSIFIER_CONNECT_TIMEOUT_MS:1000}
     read-timeout-ms: ${ASSISTANT_INTENT_CLASSIFIER_READ_TIMEOUT_MS:5000}

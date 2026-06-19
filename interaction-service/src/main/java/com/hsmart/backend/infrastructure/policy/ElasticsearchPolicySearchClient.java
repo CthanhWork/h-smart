@@ -2,11 +2,16 @@ package com.hsmart.backend.infrastructure.policy;
 
 import com.hsmart.backend.application.dto.PolicySearchResult;
 import com.hsmart.backend.application.exceptions.PolicySearchUnavailableException;
+import com.hsmart.backend.infrastructure.config.AssistantProperties;
 import com.hsmart.backend.infrastructure.config.PolicySearchProperties;
+import com.hsmart.backend.service.EmbeddingClient;
 import com.hsmart.backend.service.PolicySearchClient;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
@@ -23,15 +28,21 @@ public class ElasticsearchPolicySearchClient implements PolicySearchClient {
 
     private final RestClient policySearchRestClient;
     private final PolicySearchProperties policySearchProperties;
+    private final AssistantProperties assistantProperties;
+    private final EmbeddingClient embeddingClient;
     private final String internalSharedSecret;
 
     public ElasticsearchPolicySearchClient(
             @Qualifier("policySearchRestClient") RestClient policySearchRestClient,
             PolicySearchProperties policySearchProperties,
+            AssistantProperties assistantProperties,
+            Optional<EmbeddingClient> embeddingClient,
             @Value("${internal.security.secret:}") String internalSharedSecret
     ) {
         this.policySearchRestClient = policySearchRestClient;
         this.policySearchProperties = policySearchProperties;
+        this.assistantProperties = assistantProperties;
+        this.embeddingClient = embeddingClient.orElse(null);
         this.internalSharedSecret = internalSharedSecret;
     }
 
@@ -54,16 +65,40 @@ public class ElasticsearchPolicySearchClient implements PolicySearchClient {
     }
 
     private Map<String, Object> buildSearchRequest(String query) {
-        return Map.of(
-                "size", Math.max(1, policySearchProperties.pageSize()),
-                "query", Map.of(
-                        "multi_match", Map.of(
-                                "query", query,
-                                "fields", List.of("title^2", "content"),
-                                "fuzziness", "AUTO"
-                        )
+        int pageSize = Math.max(1, policySearchProperties.pageSize());
+        Map<String, Object> request = new HashMap<>();
+        request.put("size", pageSize);
+        request.put("query", Map.of(
+                "multi_match", Map.of(
+                        "query", query,
+                        "fields", List.of("title^2", "content"),
+                        "fuzziness", "AUTO"
                 )
-        );
+        ));
+
+        if (assistantProperties.hybridSearchEnabled() && embeddingClient != null) {
+            tryAddKnnClause(request, query, pageSize);
+        }
+
+        return request;
+    }
+
+    private void tryAddKnnClause(Map<String, Object> request, String query, int pageSize) {
+        try {
+            List<Double> embedding = embeddingClient.embedText(query);
+            if (embedding != null && !embedding.isEmpty()) {
+                request.put("knn", Map.of(
+                        "field", "embedding",
+                        "query_vector", embedding,
+                        "k", pageSize,
+                        "num_candidates", Math.max(50, pageSize * 10)
+                ));
+                log.debug("Hybrid knn+BM25 search enabled for policy query");
+            }
+        } catch (Exception exception) {
+            log.warn("Embedding generation failed, falling back to BM25-only policy search. Reason: {}",
+                    exception.getMessage());
+        }
     }
 
     @SuppressWarnings("unchecked")

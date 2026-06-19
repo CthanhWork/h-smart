@@ -36,7 +36,9 @@ class ExternalRestClientConfigurationTest {
                             400,
                             0.3,
                             0.7,
-                            200
+                            200,
+                            "",
+                            false
                     )
             );
             context.registerBean(

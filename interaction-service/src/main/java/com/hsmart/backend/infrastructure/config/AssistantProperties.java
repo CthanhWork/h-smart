@@ -16,6 +16,8 @@ public record AssistantProperties(
         int maxTokens,
         double frequencyPenalty,
         double productDescriptionTemperature,
-        int productDescriptionMaxTokens
+        int productDescriptionMaxTokens,
+        String embeddingModel,
+        boolean hybridSearchEnabled
 ) {
 }

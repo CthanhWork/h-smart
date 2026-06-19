@@ -77,7 +77,9 @@ class AssistantServiceImplTest {
                 400,
                 0.3,
                 0.7,
-                200
+                200,
+                "",
+                false
         );
         AssistantServiceImpl assistantService = new AssistantServiceImpl(
                 chatMessageRepository,
@@ -420,7 +422,9 @@ class AssistantServiceImplTest {
                 400,
                 0.3,
                 0.7,
-                200
+                200,
+                "",
+                false
         );
         return new AssistantServiceImpl(
                 chatMessageRepository,
