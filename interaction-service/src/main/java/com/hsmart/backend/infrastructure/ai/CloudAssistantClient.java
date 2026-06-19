@@ -59,7 +59,7 @@ public class CloudAssistantClient implements AssistantModelClient {
                                        Consumer<String> onToken, Runnable onComplete) {
         validateProviderConfiguration();
 
-        ChatCompletionRequest request = new ChatCompletionRequest(
+        ChatCompletionRequest request = buildRequest(
                 assistantProperties.model(),
                 messages,
                 true,
@@ -68,6 +68,29 @@ public class CloudAssistantClient implements AssistantModelClient {
                 assistantProperties.frequencyPenalty()
         );
 
+        executeStreamingRequest(request, onToken, onComplete, request.frequencyPenalty() != null);
+    }
+
+    private String sendRequest(List<AssistantChatMessage> messages,
+                               double temperature, int maxTokens, Double frequencyPenalty) {
+        validateProviderConfiguration();
+
+        ChatCompletionRequest request = buildRequest(
+                assistantProperties.model(),
+                messages,
+                false,
+                temperature,
+                maxTokens,
+                frequencyPenalty
+        );
+
+        return executeChatCompletionRequest(request, request.frequencyPenalty() != null);
+    }
+
+    private void executeStreamingRequest(ChatCompletionRequest request,
+                                         Consumer<String> onToken,
+                                         Runnable onComplete,
+                                         boolean canRetryWithoutFrequencyPenalty) {
         try {
             aiProviderRestClient.post()
                     .uri(CHAT_COMPLETIONS_PATH)
@@ -100,25 +123,30 @@ public class CloudAssistantClient implements AssistantModelClient {
                         onComplete.run();
                         return null;
                     });
+        } catch (RestClientResponseException exception) {
+            if (canRetryWithoutFrequencyPenalty && isUnsupportedFrequencyPenalty(exception)) {
+                log.warn("AI provider rejected frequency_penalty for model {} during streaming. Retrying without that field",
+                        assistantProperties.model());
+                executeStreamingRequest(withoutFrequencyPenalty(request), onToken, onComplete, false);
+                return;
+            }
+            log.error("Streaming request failed with HTTP {} for model {}",
+                    exception.getStatusCode().value(), assistantProperties.model(), exception);
+            throw new AssistantServiceUnavailableException("Streaming assistant is unavailable", exception);
+        } catch (ResourceAccessException exception) {
+            if (isTimeout(exception)) {
+                log.error("Streaming request timed out for model {}", assistantProperties.model(), exception);
+                throw new AssistantGatewayTimeoutException("Streaming assistant timed out", exception);
+            }
+            log.error("Streaming network request failed for model {}", assistantProperties.model(), exception);
+            throw new AssistantServiceUnavailableException("Streaming assistant is unavailable", exception);
         } catch (RestClientException exception) {
             log.error("Streaming request failed for model {}", assistantProperties.model(), exception);
             throw new AssistantServiceUnavailableException("Streaming assistant is unavailable", exception);
         }
     }
 
-    private String sendRequest(List<AssistantChatMessage> messages,
-                               double temperature, int maxTokens, Double frequencyPenalty) {
-        validateProviderConfiguration();
-
-        ChatCompletionRequest request = new ChatCompletionRequest(
-                assistantProperties.model(),
-                messages,
-                false,
-                temperature,
-                maxTokens,
-                frequencyPenalty
-        );
-
+    private String executeChatCompletionRequest(ChatCompletionRequest request, boolean canRetryWithoutFrequencyPenalty) {
         try {
             ChatCompletionResponse response = aiProviderRestClient.post()
                     .uri(CHAT_COMPLETIONS_PATH)
@@ -134,6 +162,11 @@ public class CloudAssistantClient implements AssistantModelClient {
 
             return message.content().trim();
         } catch (RestClientResponseException exception) {
+            if (canRetryWithoutFrequencyPenalty && isUnsupportedFrequencyPenalty(exception)) {
+                log.warn("AI provider rejected frequency_penalty for model {}. Retrying without that field",
+                        assistantProperties.model());
+                return executeChatCompletionRequest(withoutFrequencyPenalty(request), false);
+            }
             log.error("AI provider returned HTTP {} for model {}",
                     exception.getStatusCode().value(), assistantProperties.model(), exception);
             if (exception.getStatusCode().value() == 408 || exception.getStatusCode().value() == 504) {
@@ -151,6 +184,33 @@ public class CloudAssistantClient implements AssistantModelClient {
             log.error("AI provider request failed for model {}", assistantProperties.model(), exception);
             throw new AssistantServiceUnavailableException("Assistant service is unavailable", exception);
         }
+    }
+
+    private ChatCompletionRequest buildRequest(String model,
+                                               List<AssistantChatMessage> messages,
+                                               boolean stream,
+                                               double temperature,
+                                               int maxTokens,
+                                               Double frequencyPenalty) {
+        return new ChatCompletionRequest(
+                model,
+                messages,
+                stream,
+                temperature,
+                maxTokens,
+                frequencyPenalty
+        );
+    }
+
+    private ChatCompletionRequest withoutFrequencyPenalty(ChatCompletionRequest request) {
+        return buildRequest(
+                request.model(),
+                request.messages(),
+                request.stream(),
+                request.temperature(),
+                request.maxTokens(),
+                null
+        );
     }
 
     private String extractStreamingToken(String jsonChunk) {
@@ -194,6 +254,21 @@ public class CloudAssistantClient implements AssistantModelClient {
             current = current.getCause();
         }
         return false;
+    }
+
+    private boolean isUnsupportedFrequencyPenalty(RestClientResponseException exception) {
+        if (exception.getStatusCode().value() != 400) {
+            return false;
+        }
+
+        String responseBody = exception.getResponseBodyAsString();
+        if (!StringUtils.hasText(responseBody)) {
+            return false;
+        }
+
+        String normalizedBody = responseBody.toLowerCase();
+        return normalizedBody.contains("frequency_penalty")
+                && (normalizedBody.contains("unknown name") || normalizedBody.contains("cannot find field"));
     }
 
     @JsonInclude(JsonInclude.Include.NON_NULL)

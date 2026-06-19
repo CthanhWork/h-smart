@@ -83,6 +83,47 @@ class CloudAssistantClientTest {
         server.verify();
     }
 
+    @Test
+    void generateReplyShouldRetryWithoutFrequencyPenaltyWhenProviderRejectsIt() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://api.openai.com/v1");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        CloudAssistantClient client = new CloudAssistantClient(builder.build(), properties("test-key", "gpt-test"), new ObjectMapper());
+
+        server.expect(once(), requestTo("https://api.openai.com/v1/chat/completions"))
+                .andExpect(content().string(Matchers.containsString("\"frequency_penalty\":0.3")))
+                .andRespond(withStatus(HttpStatus.BAD_REQUEST)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .body("""
+                                {
+                                  "error": {
+                                    "code": 400,
+                                    "message": "Invalid JSON payload received. Unknown name \\"frequency_penalty\\": Cannot find field.",
+                                    "status": "INVALID_ARGUMENT"
+                                  }
+                                }
+                                """));
+
+        server.expect(once(), requestTo("https://api.openai.com/v1/chat/completions"))
+                .andExpect(content().string(Matchers.not(Matchers.containsString("\"frequency_penalty\""))))
+                .andRespond(withSuccess("""
+                        {
+                          "choices": [
+                            {
+                              "message": {
+                                "role": "assistant",
+                                "content": "Da thu lai khong kem frequency penalty"
+                              }
+                            }
+                          ]
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        String reply = client.generateReply(List.of(new AssistantChatMessage("user", "Hello")));
+
+        assertEquals("Da thu lai khong kem frequency penalty", reply);
+        server.verify();
+    }
+
     private AssistantProperties properties(String apiKey, String model) {
         return new AssistantProperties(
                 "https://api.openai.com/v1",
