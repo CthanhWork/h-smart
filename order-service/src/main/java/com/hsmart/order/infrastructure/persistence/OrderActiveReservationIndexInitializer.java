@@ -24,6 +24,14 @@ public class OrderActiveReservationIndexInitializer implements ApplicationRunner
             check (delivery_method in ('GHTK', 'VIETTEL_POST'))
             """;
 
+    // Hibernate ddl-auto=update creates the status check on first run but never updates it
+    // when the OrderStatus enum gains values (e.g. RETURN_REQUESTED, RETURNED) — refresh it here.
+    private static final String RECREATE_STATUS_CHECK_SQL = """
+            alter table orders drop constraint if exists orders_status_check;
+            alter table orders add constraint orders_status_check
+            check (status in ('PENDING', 'PROCESSING', 'COMPLETED', 'CANCELLED', 'RETURN_REQUESTED', 'RETURNED'))
+            """;
+
     private final JdbcTemplate jdbcTemplate;
 
     @Override
@@ -40,6 +48,13 @@ public class OrderActiveReservationIndexInitializer implements ApplicationRunner
             log.info("Ensured order delivery method check constraint supports configured providers");
         } catch (RuntimeException exception) {
             log.warn("Could not refresh order delivery method check constraint", exception);
+        }
+
+        try {
+            jdbcTemplate.execute(RECREATE_STATUS_CHECK_SQL);
+            log.info("Ensured order status check constraint supports return statuses");
+        } catch (RuntimeException exception) {
+            log.warn("Could not refresh order status check constraint", exception);
         }
     }
 }
