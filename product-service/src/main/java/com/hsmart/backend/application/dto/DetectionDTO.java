@@ -21,4 +21,7 @@ public class DetectionDTO {
 
     private Double score;
     private List<Double> bbox;
+
+    @JsonProperty("translated_label")
+    private String translatedLabel;
 }

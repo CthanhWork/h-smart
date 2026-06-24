@@ -27,7 +27,6 @@ import com.hsmart.backend.service.MarketplaceScopeGuard;
 import com.hsmart.backend.service.OrderClient;
 import com.hsmart.backend.service.PolicySearchService;
 import com.hsmart.backend.service.ProductContextService;
-import com.hsmart.backend.service.ProductKeywordExtractor;
 import io.micrometer.tracing.Tracer;
 import java.math.BigDecimal;
 import java.time.Instant;
@@ -60,7 +59,7 @@ class AssistantServiceImplTest {
     @Mock
     private Tracer tracer;
 
-    private final MarketplaceScopeGuard marketplaceScopeGuard = new MarketplaceScopeGuard(new ProductKeywordExtractor());
+    private final MarketplaceScopeGuard marketplaceScopeGuard = new MarketplaceScopeGuard();
 
     @Test
     void chatShouldSendContextAndStoreConversationTurn() {
@@ -282,56 +281,95 @@ class AssistantServiceImplTest {
     void generateProductDescriptionShouldUseDedicatedPromptAndReturnGeneratedText() {
         AssistantServiceImpl assistantService = newAssistantService();
         ProductDescriptionRequest request = ProductDescriptionRequest.builder()
-                .productName("Leather sofa")
-                .category("Living room furniture")
-                .condition("Used, minor scratch")
+                .productName("Sofa da")
+                .category("Nội thất phòng khách")
+                .condition("Đã qua sử dụng, xước nhẹ")
                 .price(BigDecimal.valueOf(1500000))
                 .build();
-        when(assistantModelClient.generateDescriptionReply(any())).thenReturn("- Sofa da that con dep\n- Gia hop ly");
+        when(assistantModelClient.generateDescriptionReply(any())).thenReturn("Sofa da bền đẹp phù hợp phòng khách.");
 
         ProductDescriptionResponse response = assistantService.generateProductDescription(request);
 
-        assertEquals("Sofa da that con dep Gia hop ly", response.generatedDescription());
+        assertEquals("Sofa da bền đẹp phù hợp phòng khách.", response.generatedDescription());
         @SuppressWarnings("unchecked")
         ArgumentCaptor<List<AssistantChatMessage>> promptCaptor = ArgumentCaptor.forClass(List.class);
         verify(assistantModelClient).generateDescriptionReply(promptCaptor.capture());
         List<AssistantChatMessage> prompt = promptCaptor.getValue();
         assertEquals(2, prompt.size());
         assertEquals("system", prompt.get(0).role());
-        assertEquals(true, prompt.get(0).content().contains("expert copywriter for H-Smart"));
-        assertEquals(true, prompt.get(0).content().contains("45 to 70 Vietnamese words"));
-        assertEquals(true, prompt.get(0).content().contains("published immediately without editing"));
+        assertEquals(true, prompt.get(0).content().contains("H-Smart"));
+        assertEquals(true, prompt.get(0).content().contains("người bán"));
+        assertEquals(true, prompt.get(0).content().contains("Không bịa thông tin"));
         assertEquals("user", prompt.get(1).role());
-        assertEquals(true, prompt.get(1).content().contains("Product name: Leather sofa"));
-        assertEquals(true, prompt.get(1).content().contains("Category: Living room furniture"));
-        assertEquals(true, prompt.get(1).content().contains("Condition: Used, minor scratch"));
-        assertEquals(true, prompt.get(1).content().contains("Price: 1500000 VND"));
-        assertEquals(true, prompt.get(1).content().contains("friendly buyer-focused tone"));
-        assertEquals(true, prompt.get(1).content().contains("Do not include advice, disclaimers"));
-        assertEquals(true, prompt.get(1).content().contains("previously owned only"));
+        assertEquals(true, prompt.get(1).content().contains("Tên sản phẩm: Sofa da"));
+        assertEquals(true, prompt.get(1).content().contains("Danh mục: Nội thất phòng khách"));
+        assertEquals(true, prompt.get(1).content().contains("Tình trạng: Đã qua sử dụng, xước nhẹ"));
+        assertEquals(true, prompt.get(1).content().contains("1.500.000 ₫"));
+        assertEquals(true, prompt.get(1).content().contains("40–80 từ"));
         verifyNoInteractions(chatMessageRepository, intentClassifier, orderClient, policySearchService, productContextService);
+    }
+
+    @Test
+    void generateProductDescriptionShouldIncludeSellerNotesInPrompt() {
+        AssistantServiceImpl assistantService = newAssistantService();
+        ProductDescriptionRequest request = ProductDescriptionRequest.builder()
+                .productName("Máy giặt")
+                .category("Gia dụng")
+                .condition("Còn tốt")
+                .price(BigDecimal.valueOf(2000000))
+                .sellerNotes("Còn mới 90%, có hộp và remote đầy đủ")
+                .build();
+        when(assistantModelClient.generateDescriptionReply(any()))
+                .thenReturn("Máy giặt còn tốt, đầy đủ phụ kiện, phù hợp gia đình.");
+
+        assistantService.generateProductDescription(request);
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<AssistantChatMessage>> promptCaptor = ArgumentCaptor.forClass(List.class);
+        verify(assistantModelClient).generateDescriptionReply(promptCaptor.capture());
+        assertEquals(true, promptCaptor.getValue().get(1).content().contains("Còn mới 90%, có hộp và remote đầy đủ"));
+    }
+
+    @Test
+    void generateProductDescriptionShouldRetryOnceOnEditorialOutputThenSucceed() {
+        AssistantServiceImpl assistantService = newAssistantService();
+        ProductDescriptionRequest request = ProductDescriptionRequest.builder()
+                .productName("Tủ lạnh")
+                .category("Gia dụng")
+                .condition("Đã qua sử dụng")
+                .price(BigDecimal.valueOf(3000000))
+                .build();
+        when(assistantModelClient.generateDescriptionReply(any()))
+                .thenReturn("Bạn vui lòng bổ sung thêm thông tin trước khi đăng tin.")
+                .thenReturn("Tủ lạnh đã qua sử dụng, phù hợp gia đình nhỏ.");
+
+        ProductDescriptionResponse response = assistantService.generateProductDescription(request);
+
+        assertEquals("Tủ lạnh đã qua sử dụng, phù hợp gia đình nhỏ.", response.generatedDescription());
+        verify(assistantModelClient, times(2)).generateDescriptionReply(any());
     }
 
     @Test
     void generateProductDescriptionShouldReplaceEditorialOutputWithPublishReadyFallback() {
         AssistantServiceImpl assistantService = newAssistantService();
         ProductDescriptionRequest request = ProductDescriptionRequest.builder()
-                .productName("Ghế đã qua sử dụng")
+                .productName("Ghế văn phòng")
                 .category("Ghế")
-                .condition("Used")
+                .condition("đã qua sử dụng")
                 .price(BigDecimal.ZERO)
                 .build();
         when(assistantModelClient.generateDescriptionReply(any())).thenReturn(
-                "Mẫu ghế đã qua sử dụng này phù hợp cho gia đình. "
+                "Mẫu ghế này phù hợp cho gia đình. "
                         + "Bạn vui lòng kiểm tra và bổ sung thêm kích thước, chất liệu trước khi đăng tin."
         );
 
         ProductDescriptionResponse response = assistantService.generateProductDescription(request);
 
-        assertEquals(true, response.generatedDescription().startsWith("Ghế đã qua sử dụng là sản phẩm ghế"));
+        assertEquals(true, response.generatedDescription().startsWith("Ghế văn phòng là sản phẩm ghế đã qua sử dụng"));
         assertEquals(false, response.generatedDescription().toLowerCase().contains("vui lòng"));
         assertEquals(false, response.generatedDescription().toLowerCase().contains("bổ sung"));
         assertEquals(false, response.generatedDescription().toLowerCase().contains("trước khi đăng"));
+        verify(assistantModelClient, times(2)).generateDescriptionReply(any());
     }
 
     @Test

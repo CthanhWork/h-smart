@@ -43,6 +43,15 @@ public class Report {
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "processed_at")
+    private LocalDateTime processedAt;
+
+    @Column(name = "processed_by", length = 150)
+    private String processedBy;
+
+    @Column(name = "resolution_reason", columnDefinition = "text")
+    private String resolutionReason;
+
     @PrePersist
     public void applyDefaults() {
         if (status == null) {

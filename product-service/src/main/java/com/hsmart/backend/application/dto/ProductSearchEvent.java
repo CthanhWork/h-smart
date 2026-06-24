@@ -20,6 +20,7 @@ public class ProductSearchEvent {
     private String categoryName;
     private String status;
     private String sellerId;
+    private String imageUrl;
 
     @Builder.Default
     private List<DetectionDTO> aiMetadata = new ArrayList<>();

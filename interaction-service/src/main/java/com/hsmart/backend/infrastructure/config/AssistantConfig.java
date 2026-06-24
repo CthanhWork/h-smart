@@ -1,15 +1,29 @@
 package com.hsmart.backend.infrastructure.config;
 
 import java.time.Duration;
+import java.util.concurrent.Executor;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.web.client.ClientHttpRequestFactories;
 import org.springframework.boot.web.client.ClientHttpRequestFactorySettings;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.web.client.RestClient;
 
 @Configuration
 public class AssistantConfig {
+
+    @Bean
+    @Qualifier("streamingExecutor")
+    public Executor streamingExecutor() {
+        ThreadPoolTaskExecutor executor = new ThreadPoolTaskExecutor();
+        executor.setCorePoolSize(4);
+        executor.setMaxPoolSize(20);
+        executor.setQueueCapacity(100);
+        executor.setThreadNamePrefix("assistant-stream-");
+        executor.initialize();
+        return executor;
+    }
 
     @Bean
     @Qualifier("aiProviderRestClient")

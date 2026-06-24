@@ -38,9 +38,10 @@ class ProductSoldEventListenerTest {
 
         NotificationRequestDTO request = captor.getValue();
         assertEquals("seller-1", request.getUserId());
+        assertEquals("Sản phẩm đã bán", request.getTitle());
         assertEquals("PRODUCT_SOLD", request.getType());
         assertEquals(12L, request.getProductId());
-        assertEquals("Congratulations! Your product [Microwave] has been marked as SOLD.", request.getMessage());
+        assertEquals("Sản phẩm \"Microwave\" của bạn đã được đánh dấu là đã bán.", request.getMessage());
     }
 
     @Test

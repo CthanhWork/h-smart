@@ -17,24 +17,30 @@ public interface ProductMapper {
     @Mapping(target = "title", source = "resolvedTitle")
     @Mapping(target = "description", source = "description")
     @Mapping(target = "price", source = "price")
+    @Mapping(target = "negotiable", source = "negotiable")
+    @Mapping(target = "minPrice", source = "minPrice")
     @Mapping(target = "status", source = "status")
     @Mapping(target = "sellerId", source = "sellerId")
     @Mapping(target = "category", source = "category")
     @Mapping(target = "imageUrl", source = "relativeImageUrl")
     @Mapping(target = "imageUrls", source = "imageUrlsJson")
     @Mapping(target = "aiMetadata", source = "aiMetadataJson")
+    @Mapping(target = "titleModifiedByUser", source = "titleModifiedByUser")
     @Mapping(target = "likeCount", ignore = true)
     @Mapping(target = "updatedAt", ignore = true)
     Product toEntity(
             String description,
             java.math.BigDecimal price,
+            boolean negotiable,
+            java.math.BigDecimal minPrice,
             ProductStatus status,
             String sellerId,
             Category category,
             String resolvedTitle,
             String relativeImageUrl,
             String imageUrlsJson,
-            String aiMetadataJson
+            String aiMetadataJson,
+            boolean titleModifiedByUser
     );
 
     @Mapping(target = "title", source = "product.title")
@@ -46,6 +52,8 @@ public interface ProductMapper {
     @Mapping(target = "imageUrls", ignore = true)
     @Mapping(target = "aiMetadata", ignore = true)
     @Mapping(target = "numDetections", ignore = true)
+    @Mapping(target = "createdAt", source = "product.createdAt")
+    @Mapping(target = "titleModifiedByUser", source = "product.titleModifiedByUser")
     ProductResponseDTO toResponse(Product product, String publicBaseUrl);
 
     default ProductResponseDTO toResponse(Product product, List<DetectionDTO> detections, String publicBaseUrl) {

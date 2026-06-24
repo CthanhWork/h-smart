@@ -32,7 +32,15 @@ class ElasticsearchPolicySearchClientTest {
         );
         ElasticsearchPolicySearchClient client = new ElasticsearchPolicySearchClient(
                 restClient,
-                new PolicySearchProperties("http://elasticsearch:9200", "hsmart-policy-index", 5, 1_000, 3_000),
+                new PolicySearchProperties(
+                        "http://elasticsearch:9200",
+                        "hsmart-policy-index",
+                        5,
+                        3,
+                        0.5,
+                        1_000,
+                        3_000
+                ),
                 assistantProperties,
                 Optional.empty(),
                 "secret-123"

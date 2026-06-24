@@ -8,6 +8,7 @@ import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -15,8 +16,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hsmart.backend.application.dto.AuthResponseDTO;
+import com.hsmart.backend.application.dto.ChangeEmailRequestDTO;
+import com.hsmart.backend.application.dto.ChangePasswordRequestDTO;
 import com.hsmart.backend.application.dto.LoginRequestDTO;
 import com.hsmart.backend.application.dto.LocationOptionDTO;
+import com.hsmart.backend.application.dto.RefreshTokenRequestDTO;
 import com.hsmart.backend.application.dto.RegisterRequestDTO;
 import com.hsmart.backend.application.dto.SellerTrustResponseDTO;
 import com.hsmart.backend.application.dto.UpdateProfileRequestDTO;
@@ -25,6 +29,8 @@ import com.hsmart.backend.application.dto.UserProfileResponseDTO;
 import com.hsmart.backend.domain.entities.Role;
 import com.hsmart.backend.domain.entities.User;
 import com.hsmart.backend.infrastructure.config.JwtService;
+import com.hsmart.backend.infrastructure.config.AccountLifecycleProperties;
+import com.hsmart.backend.infrastructure.config.ApplicationProperties;
 import com.hsmart.backend.infrastructure.exception.AccountBannedException;
 import com.hsmart.backend.infrastructure.exception.DuplicateResourceException;
 import com.hsmart.backend.infrastructure.exception.InvalidCredentialsException;
@@ -46,6 +52,7 @@ import org.springframework.http.MediaType;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.mock.web.MockMultipartFile;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -189,11 +196,14 @@ class UserServiceStatusCodeTest {
         AccountLifecycleService accountLifecycleService = mock(AccountLifecycleService.class);
         AuthServiceImpl service = new AuthServiceImpl(
                 userRepository,
+                mock(com.hsmart.backend.infrastructure.persistence.AccountTokenRepository.class),
                 passwordEncoder,
                 jwtService,
                 userMapper,
                 accountLifecycleService,
-                mock(LocationCatalogService.class)
+                mock(LocationCatalogService.class),
+                mock(AccountLifecycleProperties.class),
+                mock(ApplicationProperties.class)
         );
         User bannedUser = User.builder()
                 .username("nguyenvana")
@@ -243,6 +253,36 @@ class UserServiceStatusCodeTest {
     }
 
     @Test
+    void refreshShouldReturn200WhenRefreshTokenIsValid() throws Exception {
+        RefreshTokenRequestDTO request = new RefreshTokenRequestDTO("refresh-token");
+
+        given(authService.refresh(any(RefreshTokenRequestDTO.class))).willReturn(buildAuthResponse());
+
+        mockMvc.perform(post("/api/v1/auth/refresh")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value(200))
+                .andExpect(jsonPath("$.message").value("Token refreshed successfully"))
+                .andExpect(jsonPath("$.data.accessToken").value("mock-token"))
+                .andExpect(jsonPath("$.data.refreshToken").value("mock-refresh-token"));
+    }
+
+    @Test
+    void logoutShouldReturn200() throws Exception {
+        RefreshTokenRequestDTO request = new RefreshTokenRequestDTO("refresh-token");
+
+        mockMvc.perform(post("/api/v1/auth/logout")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value(200))
+                .andExpect(jsonPath("$.message").value("Logout successful"));
+
+        org.mockito.Mockito.verify(authService).logout(any(RefreshTokenRequestDTO.class));
+    }
+
+    @Test
     void getProfileShouldReturn401WhenJwtIsMissing() throws Exception {
         mockMvc.perform(get("/api/v1/users/profile"))
                 .andExpect(status().isUnauthorized())
@@ -280,7 +320,6 @@ class UserServiceStatusCodeTest {
                 .districtCode("760")
                 .wardCode("26734")
                 .streetDetail("1 Vo Van Ngan Street")
-                .avatarUrl("https://example.com/avatar.jpg")
                 .build();
 
         UserProfileResponseDTO response = buildUserProfile();
@@ -296,6 +335,122 @@ class UserServiceStatusCodeTest {
                 .andExpect(jsonPath("$.status").value(200))
                 .andExpect(jsonPath("$.message").value("Profile updated successfully"))
                 .andExpect(jsonPath("$.data.fullName").value("Nguyen Van A Updated"));
+    }
+
+    @Test
+    void updateAvatarShouldReturn200WhenRequestIsValid() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "avatar.jpg",
+                MediaType.IMAGE_JPEG_VALUE,
+                "fake-image".getBytes()
+        );
+
+        UserProfileResponseDTO response = buildUserProfile();
+        response.setAvatarUrl("http://localhost:8000/api/v1/users/media/avatar-updated.jpg");
+
+        given(userService.updateAvatar(eq("nguyenvana"), any())).willReturn(response);
+
+        mockMvc.perform(multipart("/api/v1/users/avatar")
+                        .file(file)
+                        .with(request -> {
+                            request.setMethod("PUT");
+                            return request;
+                        })
+                        .with(user("nguyenvana"))
+                        .contentType(MediaType.MULTIPART_FORM_DATA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value(200))
+                .andExpect(jsonPath("$.message").value("Avatar updated successfully"))
+                .andExpect(jsonPath("$.data.avatarUrl").value("http://localhost:8000/api/v1/users/media/avatar-updated.jpg"));
+    }
+
+    @Test
+    void updateAvatarShouldAcceptAvatarPartAlias() throws Exception {
+        MockMultipartFile file = new MockMultipartFile(
+                "avatar",
+                "avatar.jpg",
+                MediaType.IMAGE_JPEG_VALUE,
+                "fake-image".getBytes()
+        );
+
+        UserProfileResponseDTO response = buildUserProfile();
+        response.setAvatarUrl("http://localhost:8000/api/v1/users/media/avatar-updated.jpg");
+
+        given(userService.updateAvatar(eq("nguyenvana"), any())).willReturn(response);
+
+        mockMvc.perform(multipart("/api/v1/users/avatar")
+                        .file(file)
+                        .with(request -> {
+                            request.setMethod("PUT");
+                            return request;
+                        })
+                        .with(user("nguyenvana"))
+                        .contentType(MediaType.MULTIPART_FORM_DATA))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value(200))
+                .andExpect(jsonPath("$.message").value("Avatar updated successfully"))
+                .andExpect(jsonPath("$.data.avatarUrl").value("http://localhost:8000/api/v1/users/media/avatar-updated.jpg"));
+    }
+
+    @Test
+    void updateAvatarShouldReturn400WhenMultipartHasNoFile() throws Exception {
+        mockMvc.perform(multipart("/api/v1/users/avatar")
+                        .with(request -> {
+                            request.setMethod("PUT");
+                            return request;
+                        })
+                        .with(user("nguyenvana"))
+                        .contentType(MediaType.MULTIPART_FORM_DATA))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.status").value(400))
+                .andExpect(jsonPath("$.message").value("Avatar image file is required"));
+    }
+
+    @Test
+    void changePasswordShouldReturn200WhenRequestIsValid() throws Exception {
+        ChangePasswordRequestDTO request = new ChangePasswordRequestDTO("current-password", "new-password");
+
+        mockMvc.perform(put("/api/v1/users/password")
+                        .with(user("nguyenvana"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value(200))
+                .andExpect(jsonPath("$.message").value("Password changed successfully"));
+
+        org.mockito.Mockito.verify(accountLifecycleService)
+                .changePassword("nguyenvana", "current-password", "new-password");
+    }
+
+    @Test
+    void requestEmailChangeShouldReturn200WhenRequestIsValid() throws Exception {
+        ChangeEmailRequestDTO request = new ChangeEmailRequestDTO("new@example.com");
+
+        mockMvc.perform(post("/api/v1/users/email/change")
+                        .with(user("nguyenvana"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(objectMapper.writeValueAsString(request)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value(200))
+                .andExpect(jsonPath("$.message").value("Email change verification has been sent to the new email address"));
+
+        org.mockito.Mockito.verify(accountLifecycleService)
+                .requestEmailChange("nguyenvana", "new@example.com");
+    }
+
+    @Test
+    void confirmEmailChangeShouldReturn200WhenTokenIsValid() throws Exception {
+        mockMvc.perform(post("/api/v1/users/email/confirm")
+                        .with(user("nguyenvana"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"token\":\"123456\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.status").value(200))
+                .andExpect(jsonPath("$.message").value("Email changed successfully"));
+
+        org.mockito.Mockito.verify(accountLifecycleService)
+                .confirmEmailChange("nguyenvana", "123456");
     }
 
     @Test
@@ -364,6 +519,7 @@ class UserServiceStatusCodeTest {
     private AuthResponseDTO buildAuthResponse() {
         return AuthResponseDTO.builder()
                 .accessToken("mock-token")
+                .refreshToken("mock-refresh-token")
                 .tokenType("Bearer")
                 .user(buildUserProfile())
                 .build();

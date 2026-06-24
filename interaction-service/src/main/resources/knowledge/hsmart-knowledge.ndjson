@@ -1,0 +1,32 @@
+{"index":{"_index":"hsmart-policy-index","_id":"account-register"}}
+{"title":"Đăng ký tài khoản","category":"Tài khoản","content":"Để đăng ký H-Smart, vào Đăng ký và nhập tên đăng nhập, email, mật khẩu. Họ tên, số điện thoại và địa chỉ là thông tin bổ sung. Sau khi đăng ký, bạn phải xác minh email trước khi đăng nhập.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}
+{"index":{"_index":"hsmart-policy-index","_id":"account-email-verification"}}
+{"title":"Xác minh email","category":"Tài khoản","content":"Email xác minh có hiệu lực mặc định 24 giờ. Nếu liên kết hoặc mã hết hạn, hãy yêu cầu gửi lại email xác minh. Trợ lý không thể tự xác nhận trạng thái tài khoản của bạn; hãy kiểm tra phần Tài khoản hoặc email H-Smart đã gửi.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}
+{"index":{"_index":"hsmart-policy-index","_id":"account-login"}}
+{"title":"Đăng nhập","category":"Tài khoản","content":"Bạn đăng nhập bằng tên đăng nhập hoặc email cùng mật khẩu. Tài khoản chưa xác minh email hoặc đang bị khóa không thể đăng nhập. Nếu quên mật khẩu, dùng chức năng Quên mật khẩu.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}
+{"index":{"_index":"hsmart-policy-index","_id":"account-password-reset"}}
+{"title":"Quên mật khẩu","category":"Tài khoản","content":"Chọn Quên mật khẩu và nhập email tài khoản. Token đặt lại mật khẩu có hiệu lực mặc định 30 phút. Sau khi đặt mật khẩu mới, các refresh token cũ của tài khoản bị thu hồi.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}
+{"index":{"_index":"hsmart-policy-index","_id":"account-settings"}}
+{"title":"Đổi mật khẩu, email và cập nhật hồ sơ","category":"Tài khoản","content":"Khi đã đăng nhập, bạn có thể đổi mật khẩu, cập nhật hồ sơ và địa chỉ. Đổi email cần xác nhận email mới; mã hoặc token xác nhận có hiệu lực mặc định 30 phút.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}
+{"index":{"_index":"hsmart-policy-index","_id":"listing-create"}}
+{"title":"Cách đăng bán sản phẩm","category":"Đăng bán","content":"Vào Đăng bán, tải ít nhất một ảnh rồi điền tên, mô tả, giá và danh mục. AI có thể gợi ý tên và giá; nếu AI không nhận diện được, bạn tự nhập tên sản phẩm. Tin mới luôn chờ quản trị viên duyệt trước khi hiển thị công khai.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}
+{"index":{"_index":"hsmart-policy-index","_id":"listing-moderation"}}
+{"title":"Vì sao tin đăng phải chờ duyệt","category":"Đăng bán","content":"Tin mới bắt đầu ở trạng thái PENDING_REVIEW và chỉ hiển thị công khai sau khi quản trị viên duyệt thành APPROVED. H-Smart chưa tự động đưa tin đã duyệt về chờ duyệt chỉ vì người bán sửa tiêu đề.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}
+{"index":{"_index":"hsmart-policy-index","_id":"listing-manage"}}
+{"title":"Sửa, ẩn hoặc xóa tin đăng","category":"Đăng bán","content":"Người bán có thể sửa nội dung hoặc ảnh của tin mình sở hữu, chuyển tin sang HIDDEN hoặc xóa tin. Người bán không thể tự đặt trạng thái APPROVED, PENDING_REVIEW hay SOLD; các trạng thái đó thuộc luồng quản trị và đơn hàng.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}
+{"index":{"_index":"hsmart-policy-index","_id":"listing-price-suggestion"}}
+{"title":"Giá gợi ý khi đăng bán","category":"Đăng bán","content":"Giá AI là mức tham khảo dựa trên dữ liệu giá trung bình của sản phẩm tương tự. Người bán vẫn tự quyết định giá đăng phù hợp với tình trạng món đồ.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}
+{"index":{"_index":"hsmart-policy-index","_id":"order-create"}}
+{"title":"Cách mua và đặt hàng","category":"Mua hàng","content":"Chỉ sản phẩm APPROVED mới được đặt hàng. Bạn có thể xem phí vận chuyển dự kiến rồi mua trực tiếp hoặc dùng offer đã được người bán chấp nhận. Đơn mới bắt đầu ở trạng thái PENDING và có thể theo dõi trong mục Đơn hàng.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}
+{"index":{"_index":"hsmart-policy-index","_id":"offer-create"}}
+{"title":"Trả giá và gửi đề nghị giá","category":"Trả giá","content":"Mức giảm tối đa là 30%. Bạn không thể có nhiều offer đang hoạt động cho cùng một sản phẩm. Offer hết hạn sau 24 giờ và cooldown gửi lại mặc định là 1 giờ. Offer được chấp nhận phải được chọn khi checkout để áp dụng giá giảm.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}
+{"index":{"_index":"hsmart-policy-index","_id":"order-shipping"}}
+{"title":"Theo dõi và vận chuyển đơn hàng","category":"Đơn hàng và vận chuyển","content":"H-Smart hỗ trợ GHTK và Viettel Post; phương thức mặc định hiện tại là Viettel Post. Bạn có thể xem phí dự kiến trước checkout và theo dõi mã vận đơn khi đơn được nhà vận chuyển xử lý. H-Smart không cam kết ETA nếu hệ thống chưa cung cấp dữ liệu đó.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}
+{"index":{"_index":"hsmart-policy-index","_id":"order-cancel"}}
+{"title":"Hủy đơn hàng","category":"Đơn hàng và vận chuyển","content":"Buyer hoặc seller có thể hủy đơn PENDING. Chỉ seller có thể hủy đơn PROCESSING và có thể cần hủy vận đơn thủ công với nhà vận chuyển. Đơn PENDING quá 30 phút mặc định sẽ tự chuyển CANCELLED.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}
+{"index":{"_index":"hsmart-policy-index","_id":"review-seller"}}
+{"title":"Đánh giá người bán","category":"Đánh giá","content":"Chỉ buyer của đơn COMPLETED mới có thể tạo đánh giá cho giao dịch. Đánh giá công khai giúp người mua khác tham khảo; đánh giá bị quản trị viên ẩn sẽ không xuất hiện trên danh sách công khai.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}
+{"index":{"_index":"hsmart-policy-index","_id":"product-wishlist"}}
+{"title":"Lưu sản phẩm yêu thích","category":"Khác","content":"Bạn có thể thả tim để lưu sản phẩm và xem lại trong mục yêu thích. Sản phẩm đã ẩn, đã bán hoặc không còn hiển thị công khai có thể không còn xuất hiện trong danh sách công khai.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}
+{"index":{"_index":"hsmart-policy-index","_id":"chat-seller"}}
+{"title":"Nhắn tin với người bán","category":"Khác","content":"H-Smart hỗ trợ chat thời gian thực giữa người mua và người bán theo sản phẩm. Bạn có thể hỏi thêm về tình trạng món đồ, nhưng chat không thay thế trạng thái offer, đơn hàng hoặc vận chuyển được ghi nhận trong hệ thống.","version":1,"updatedAt":"2026-06-22","source":"hsmart-codebase"}

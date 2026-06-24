@@ -51,6 +51,8 @@ class ExternalRestClientConfigurationTest {
                             "http://elasticsearch-disabled:9200",
                             "hsmart-policy-index",
                             2,
+                            2,
+                            0.5,
                             1_000,
                             3_000
                     )

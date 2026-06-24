@@ -20,6 +20,8 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
 
     Optional<Product> findByIdAndIsDeletedFalse(Long id);
 
+    Page<Product> findAllBySellerIdAndIsDeletedFalse(String sellerId, Pageable pageable);
+
     long countByIsDeletedFalseAndStatusIn(Collection<ProductStatus> statuses);
 
     @Modifying

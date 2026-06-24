@@ -2,7 +2,7 @@ package com.hsmart.backend.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
-import static org.mockito.ArgumentMatchers.any;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
@@ -46,13 +46,13 @@ class AccountLifecycleServiceImplTest {
                 userRepository,
                 tokenRepository,
                 accountEmailService,
-                new AccountLifecycleProperties("https://hsmart.example", 1440, 30),
+                new AccountLifecycleProperties("https://hsmart.example", 1440, 30, 30, 10080),
                 passwordEncoder
         );
     }
 
     @Test
-    void passwordResetRequestShouldStoreOnlyHashedToken() {
+    void passwordResetRequestShouldStoreOnlyHashedSixDigitOtp() {
         User user = activeUser();
         when(userRepository.findByEmail("user@example.com")).thenReturn(Optional.of(user));
 
@@ -62,6 +62,8 @@ class AccountLifecycleServiceImplTest {
         ArgumentCaptor<String> rawToken = ArgumentCaptor.forClass(String.class);
         verify(tokenRepository).save(storedToken.capture());
         verify(accountEmailService).sendPasswordResetEmail(eq(user), rawToken.capture());
+
+        assertTrue(rawToken.getValue().matches("\\d{6}"));
         assertNotEquals(rawToken.getValue(), storedToken.getValue().getTokenHash());
     }
 
@@ -77,8 +79,8 @@ class AccountLifecycleServiceImplTest {
 
         verify(userRepository).save(user);
         verify(tokenRepository).save(token);
-        org.junit.jupiter.api.Assertions.assertTrue(user.isEmailVerified());
-        org.junit.jupiter.api.Assertions.assertNotNull(token.getUsedAt());
+        assertTrue(user.isEmailVerified());
+        assertTrue(token.getUsedAt() != null);
     }
 
     @Test

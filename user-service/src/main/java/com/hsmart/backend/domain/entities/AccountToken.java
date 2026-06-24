@@ -47,6 +47,9 @@ public class AccountToken {
     @Column(name = "token_hash", nullable = false, unique = true, length = 64)
     private String tokenHash;
 
+    @Column(name = "target_email", length = 150)
+    private String targetEmail;
+
     @Column(name = "expires_at", nullable = false)
     private Instant expiresAt;
 

@@ -1,8 +1,11 @@
 package com.hsmart.backend.application.mapper;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.hsmart.backend.application.dto.DetectionDTO;
+import com.hsmart.backend.application.dto.PredictResponseDTO;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -24,23 +27,54 @@ class ProductNamingSupportTest {
         );
 
         String resolvedTitle = productNamingSupport.resolveTitle("   ", detections);
-        assertEquals("Washing machine", resolvedTitle);
+        assertEquals("Máy giặt", resolvedTitle);
     }
 
     @Test
-    void shouldTranslateKnownLvisLabelWhenTitleIsBlank() {
+    void shouldPreferTranslatedLabelFromAiServiceWhenPresent() {
         List<DetectionDTO> detections = List.of(
-                DetectionDTO.builder().label("microwave_oven").score(0.97).build(),
+                DetectionDTO.builder().label("microwave").translatedLabel("Lò vi sóng").score(0.97).build(),
                 DetectionDTO.builder().label("chair").score(0.22).build()
         );
 
         String resolvedTitle = productNamingSupport.resolveTitle(null, detections);
-        assertEquals("Lo vi song", resolvedTitle);
+        assertEquals("Lò vi sóng", resolvedTitle);
     }
 
     @Test
-    void shouldReturnFallbackWhenNoDetectionExists() {
+    void shouldTranslateKnownModelLabelWhenNoTranslatedLabelIsProvided() {
+        List<DetectionDTO> detections = List.of(
+                DetectionDTO.builder().label("microwave").score(0.97).build()
+        );
+
+        String resolvedTitle = productNamingSupport.resolveTitle(null, detections);
+        assertEquals("Lò vi sóng", resolvedTitle);
+    }
+
+    @Test
+    void shouldNotFabricateNameWhenNoDetectionExists() {
         String resolvedTitle = productNamingSupport.resolveTitle(null, List.of());
-        assertEquals("Unknown product", resolvedTitle);
+        assertEquals("", resolvedTitle);
+    }
+
+    @Test
+    void shouldFlagUnrecognizedWhenSentinelLabelAndNoDetections() {
+        PredictResponseDTO unknown = PredictResponseDTO.builder()
+                .label("unknown")
+                .translatedLabel("Không xác định")
+                .numDetections(0)
+                .detections(List.of())
+                .build();
+
+        assertTrue(productNamingSupport.isUnrecognized(unknown));
+    }
+
+    @Test
+    void shouldNotFlagUnrecognizedWhenDetectionExists() {
+        PredictResponseDTO recognized = PredictResponseDTO.builder()
+                .detections(List.of(DetectionDTO.builder().label("chair").score(0.8).build()))
+                .build();
+
+        assertFalse(productNamingSupport.isUnrecognized(recognized));
     }
 }

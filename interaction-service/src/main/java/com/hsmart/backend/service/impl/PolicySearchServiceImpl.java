@@ -20,8 +20,6 @@ import org.springframework.util.StringUtils;
 @RequiredArgsConstructor
 public class PolicySearchServiceImpl implements PolicySearchService {
 
-    private static final int MAX_POLICY_CHUNKS = 2;
-
     private final PolicySearchClient policySearchClient;
     private final PolicySearchProperties policySearchProperties;
     private final Tracer tracer;
@@ -38,7 +36,8 @@ public class PolicySearchServiceImpl implements PolicySearchService {
 
         List<String> chunks = policySearchClient.searchPolicies(normalizedQuery).stream()
                 .sorted(Comparator.comparingDouble(PolicySearchResult::score).reversed())
-                .limit(MAX_POLICY_CHUNKS)
+                .filter(result -> result.score() >= Math.max(0.0, policySearchProperties.minScore()))
+                .limit(Math.max(1, policySearchProperties.maxChunks()))
                 .map(this::toChunk)
                 .toList();
 

@@ -21,6 +21,14 @@ public class ProductRequestDTO {
     @DecimalMin(value = "0.0", inclusive = true)
     private BigDecimal price;
 
+    /** When true the listing accepts buyer offers and {@link #minPrice} becomes required. */
+    private boolean negotiable;
+
+    /** Lowest price the seller will accept for an offer; ignored when {@link #negotiable} is false. */
+    @DecimalMin(value = "0.0", inclusive = false)
+    private BigDecimal minPrice;
+
     private ProductStatus status;
     private Long categoryId;
+    private boolean titleModifiedByUser;
 }

@@ -160,6 +160,14 @@ public class CloudAssistantClient implements AssistantModelClient {
                 throw new AssistantServiceUnavailableException("Assistant response is empty");
             }
 
+            if (response.usage() != null) {
+                log.info("Token usage — model={} prompt={} completion={} total={}",
+                        assistantProperties.model(),
+                        response.usage().promptTokens(),
+                        response.usage().completionTokens(),
+                        response.usage().totalTokens());
+            }
+
             return message.content().trim();
         } catch (RestClientResponseException exception) {
             if (canRetryWithoutFrequencyPenalty && isUnsupportedFrequencyPenalty(exception)) {
@@ -283,7 +291,15 @@ public class CloudAssistantClient implements AssistantModelClient {
     }
 
     private record ChatCompletionResponse(
-            List<ChatCompletionChoice> choices
+            List<ChatCompletionChoice> choices,
+            UsageStats usage
+    ) {
+    }
+
+    private record UsageStats(
+            @JsonProperty("prompt_tokens") Integer promptTokens,
+            @JsonProperty("completion_tokens") Integer completionTokens,
+            @JsonProperty("total_tokens") Integer totalTokens
     ) {
     }
 

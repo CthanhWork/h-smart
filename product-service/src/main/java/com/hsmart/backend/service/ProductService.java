@@ -12,11 +12,13 @@ import org.springframework.web.multipart.MultipartFile;
 
 public interface ProductService {
     ProductResponseDTO createProduct(ProductRequestDTO request, List<MultipartFile> images, int analysisImageIndex) throws IOException;
-    ProductResponseDTO updateProduct(Long id, ProductRequestDTO request);
+    ProductResponseDTO updateProduct(Long id, ProductRequestDTO request, List<MultipartFile> newImages) throws IOException;
     void deleteProduct(Long id);
     PageResponseDTO<ProductResponseDTO> getAllProducts(String keyword, ProductStatus status, Long categoryId, Pageable pageable);
+    PageResponseDTO<ProductResponseDTO> getMyProducts(Pageable pageable);
     PageResponseDTO<ProductResponseDTO> getWishlist(Pageable pageable);
     ProductResponseDTO getProductById(Long id);
+    ProductResponseDTO getProductByIdForAdmin(Long id);
     String toggleProductLike(Long id);
     void markProductSoldFromOrderEvent(Long productId);
     ProductResponseDTO updateModerationStatus(Long id, ProductStatus status);

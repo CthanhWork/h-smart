@@ -5,6 +5,8 @@ import com.hsmart.review.application.exceptions.DuplicateReviewException;
 import com.hsmart.review.application.exceptions.MissingUserContextException;
 import com.hsmart.review.application.exceptions.OrderVerificationException;
 import com.hsmart.review.application.exceptions.OrderVerificationUnavailableException;
+import com.hsmart.review.application.exceptions.ReviewNotFoundException;
+import org.springframework.dao.DataIntegrityViolationException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -32,6 +34,19 @@ public class ApiExceptionHandler {
     public ResponseEntity<ApiResponse<Void>> handleDuplicateReview(DuplicateReviewException exception) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiResponse.error(HttpStatus.CONFLICT, exception.getMessage()));
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDataIntegrityViolation(DataIntegrityViolationException exception) {
+        log.warn("Data integrity violation in review-service", exception);
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(HttpStatus.CONFLICT, "This order has already been reviewed"));
+    }
+
+    @ExceptionHandler(ReviewNotFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleReviewNotFound(ReviewNotFoundException exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.error(HttpStatus.NOT_FOUND, exception.getMessage()));
     }
 
     @ExceptionHandler(OrderVerificationUnavailableException.class)

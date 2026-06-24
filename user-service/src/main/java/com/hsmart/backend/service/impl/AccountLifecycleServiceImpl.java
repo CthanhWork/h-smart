@@ -4,7 +4,11 @@ import com.hsmart.backend.domain.entities.AccountToken;
 import com.hsmart.backend.domain.entities.AccountTokenType;
 import com.hsmart.backend.domain.entities.User;
 import com.hsmart.backend.infrastructure.config.AccountLifecycleProperties;
+import com.hsmart.backend.infrastructure.exception.DuplicateResourceException;
 import com.hsmart.backend.infrastructure.exception.InvalidAccountTokenException;
+import com.hsmart.backend.infrastructure.exception.InvalidCredentialsException;
+import com.hsmart.backend.infrastructure.exception.InvalidRequestException;
+import com.hsmart.backend.infrastructure.exception.ResourceNotFoundException;
 import com.hsmart.backend.infrastructure.persistence.AccountTokenRepository;
 import com.hsmart.backend.infrastructure.persistence.UserRepository;
 import com.hsmart.backend.service.AccountEmailService;
@@ -15,12 +19,13 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Base64;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.util.StringUtils;
 
 @Slf4j
 @Service
@@ -29,6 +34,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class AccountLifecycleServiceImpl implements AccountLifecycleService {
 
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private static final int OTP_LENGTH = 6;
+    private static final int OTP_BOUND = 1_000_000;
+    private static final int TOKEN_SAVE_ATTEMPTS = 5;
 
     private final UserRepository userRepository;
     private final AccountTokenRepository tokenRepository;
@@ -83,22 +91,100 @@ public class AccountLifecycleServiceImpl implements AccountLifecycleService {
         user.setPassword(passwordEncoder.encode(newPassword));
         token.setUsedAt(Instant.now());
         tokenRepository.deleteAllByUserAndType(user, AccountTokenType.PASSWORD_RESET);
+        revokeRefreshTokens(user);
         userRepository.save(user);
         log.info("Reset password for user {}", user.getUsername());
     }
 
+    @Override
+    public void changePassword(String username, String currentPassword, String newPassword) {
+        User user = findUserByUsername(username);
+        if (!passwordEncoder.matches(currentPassword, user.getPassword())) {
+            throw new InvalidCredentialsException("Current password is incorrect");
+        }
+        if (passwordEncoder.matches(newPassword, user.getPassword())) {
+            throw new InvalidRequestException("New password must be different from the current password");
+        }
+
+        user.setPassword(passwordEncoder.encode(newPassword));
+        revokeRefreshTokens(user);
+        userRepository.save(user);
+        log.info("Changed password for user {}", user.getUsername());
+    }
+
+    @Override
+    public void requestEmailChange(String username, String newEmail) {
+        User user = findUserByUsername(username);
+        String normalizedEmail = normalizeEmail(newEmail);
+
+        if (normalizedEmail.equals(user.getEmail())) {
+            throw new InvalidRequestException("New email must be different from the current email");
+        }
+        if (userRepository.existsByEmail(normalizedEmail)) {
+            throw new DuplicateResourceException("Email already exists");
+        }
+
+        String token = issueToken(
+                user,
+                AccountTokenType.EMAIL_CHANGE,
+                Duration.ofMinutes(properties.emailChangeTokenMinutes()),
+                normalizedEmail
+        );
+        accountEmailService.sendEmailChangeEmail(user, normalizedEmail, token);
+        log.info("Issued email change token for user {}", user.getUsername());
+    }
+
+    @Override
+    public void confirmEmailChange(String username, String rawToken) {
+        User user = findUserByUsername(username);
+        AccountToken token = requireUsableToken(rawToken, AccountTokenType.EMAIL_CHANGE);
+        if (!token.getUser().getId().equals(user.getId()) || !StringUtils.hasText(token.getTargetEmail())) {
+            throw new InvalidAccountTokenException();
+        }
+
+        String normalizedEmail = normalizeEmail(token.getTargetEmail());
+        if (!normalizedEmail.equals(user.getEmail()) && userRepository.existsByEmail(normalizedEmail)) {
+            throw new DuplicateResourceException("Email already exists");
+        }
+
+        user.setEmail(normalizedEmail);
+        user.setEmailVerified(true);
+        tokenRepository.deleteAllByUserAndType(user, AccountTokenType.EMAIL_CHANGE);
+        userRepository.save(user);
+        log.info("Changed email for user {}", user.getUsername());
+    }
+
+    @Override
+    public void revokeRefreshTokens(User user) {
+        tokenRepository.deleteAllByUserAndType(user, AccountTokenType.REFRESH_TOKEN);
+    }
+
     private String issueToken(User user, AccountTokenType type, Duration lifetime) {
+        return issueToken(user, type, lifetime, null);
+    }
+
+    private String issueToken(User user, AccountTokenType type, Duration lifetime, String targetEmail) {
         tokenRepository.deleteAllByUserAndType(user, type);
-        String rawToken = generateRawToken();
         Instant now = Instant.now();
-        tokenRepository.save(AccountToken.builder()
-                .user(user)
-                .type(type)
-                .tokenHash(hash(rawToken))
-                .createdAt(now)
-                .expiresAt(now.plus(lifetime))
-                .build());
-        return rawToken;
+
+        for (int attempt = 0; attempt < TOKEN_SAVE_ATTEMPTS; attempt++) {
+            String rawToken = generateOtpCode();
+            try {
+                tokenRepository.save(AccountToken.builder()
+                        .user(user)
+                        .type(type)
+                        .tokenHash(hash(rawToken))
+                        .targetEmail(targetEmail)
+                        .createdAt(now)
+                        .expiresAt(now.plus(lifetime))
+                        .build());
+                return rawToken;
+            } catch (DataIntegrityViolationException exception) {
+                log.warn("Generated duplicate OTP for user {} and token type {}. Retrying.", user.getUsername(), type);
+            }
+        }
+
+        throw new IllegalStateException("Failed to issue OTP token after repeated attempts");
     }
 
     private AccountToken requireUsableToken(String rawToken, AccountTokenType type) {
@@ -110,16 +196,19 @@ public class AccountLifecycleServiceImpl implements AccountLifecycleService {
         return token;
     }
 
-    private String generateRawToken() {
-        byte[] bytes = new byte[32];
-        SECURE_RANDOM.nextBytes(bytes);
-        return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+    private User findUserByUsername(String username) {
+        return userRepository.findByUsername(username)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+    }
+
+    private String generateOtpCode() {
+        return String.format("%0" + OTP_LENGTH + "d", SECURE_RANDOM.nextInt(OTP_BOUND));
     }
 
     private String hash(String rawToken) {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256")
-                    .digest(rawToken.trim().getBytes(StandardCharsets.UTF_8));
+                    .digest(normalizeToken(rawToken).getBytes(StandardCharsets.UTF_8));
             return java.util.HexFormat.of().formatHex(digest);
         } catch (NoSuchAlgorithmException exception) {
             throw new IllegalStateException("SHA-256 is unavailable", exception);
@@ -128,5 +217,12 @@ public class AccountLifecycleServiceImpl implements AccountLifecycleService {
 
     private String normalizeEmail(String email) {
         return email.trim().toLowerCase();
+    }
+
+    private String normalizeToken(String rawToken) {
+        if (rawToken == null) {
+            return "";
+        }
+        return rawToken.replaceAll("\\s+", "").trim();
     }
 }

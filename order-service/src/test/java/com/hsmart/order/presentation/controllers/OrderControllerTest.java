@@ -39,7 +39,7 @@ class OrderControllerTest {
 
     @Test
     void createOrderShouldRequireGatewayUserContext() throws Exception {
-        mockMvc.perform(post("/api/v1/orders")
+        mockMvc.perform(post("/api/v1/orders/internal/from-deposit")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {
@@ -65,7 +65,7 @@ class OrderControllerTest {
                 .status(OrderStatus.PENDING)
                 .build());
 
-        mockMvc.perform(post("/api/v1/orders")
+        mockMvc.perform(post("/api/v1/orders/internal/from-deposit")
                         .header("X-User-Id", "buyer-one")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -86,7 +86,7 @@ class OrderControllerTest {
         given(orderService.createOrder(any(), eq("buyer-one")))
                 .willThrow(new ShippingProviderUnavailableException("Shipping fee calculation failed"));
 
-        mockMvc.perform(post("/api/v1/orders")
+        mockMvc.perform(post("/api/v1/orders/internal/from-deposit")
                         .header("X-User-Id", "buyer-one")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
@@ -102,7 +102,7 @@ class OrderControllerTest {
 
     @Test
     void createOrderShouldRejectUnsupportedDeliveryMethodPayload() throws Exception {
-        mockMvc.perform(post("/api/v1/orders")
+        mockMvc.perform(post("/api/v1/orders/internal/from-deposit")
                         .header("X-User-Id", "buyer-one")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""

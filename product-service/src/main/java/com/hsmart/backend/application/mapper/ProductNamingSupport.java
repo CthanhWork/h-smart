@@ -1,6 +1,7 @@
 package com.hsmart.backend.application.mapper;
 
 import com.hsmart.backend.application.dto.DetectionDTO;
+import com.hsmart.backend.application.dto.PredictResponseDTO;
 import java.util.Map;
 import java.util.List;
 import java.util.Locale;
@@ -10,65 +11,55 @@ import org.springframework.util.StringUtils;
 @Component
 public class ProductNamingSupport {
 
+    /** Sentinel label returned by ai-service when no object is recognized. */
+    public static final String UNKNOWN_LABEL = "unknown";
+
+    // Keys mirror the 20 classes emitted by ai-service (yolo_detector.py). Used only as a fallback
+    // when a detection does not carry a translated_label from ai-service.
     private static final Map<String, String> LABEL_TRANSLATIONS = Map.ofEntries(
-            Map.entry("air_conditioner", "May lanh"),
-            Map.entry("automatic_washer", "May giat"),
-            Map.entry("bed", "Giuong"),
-            Map.entry("bedspread", "Tam phu giuong"),
-            Map.entry("bench", "Ghe dai"),
-            Map.entry("blender", "May xay"),
-            Map.entry("bunk_bed", "Giuong tang"),
-            Map.entry("cabinet", "Tu"),
-            Map.entry("chair", "Ghe"),
-            Map.entry("coffee_table", "Ban tra"),
-            Map.entry("cupboard", "Tu chen"),
-            Map.entry("deck_chair", "Ghe thu gian"),
-            Map.entry("desk", "Ban lam viec"),
-            Map.entry("dining_table", "Ban an"),
-            Map.entry("drawer", "Ngan keo"),
-            Map.entry("electric_chair", "Ghe dien"),
-            Map.entry("fan", "Quat"),
-            Map.entry("faucet", "Voi nuoc"),
-            Map.entry("file_cabinet", "Tu ho so"),
-            Map.entry("folding_chair", "Ghe gap"),
-            Map.entry("hand_glass", "Guong cam tay"),
-            Map.entry("highchair", "Ghe em be"),
-            Map.entry("kettle", "Am nuoc"),
-            Map.entry("kitchen_sink", "Bon rua chen"),
-            Map.entry("kitchen_table", "Ban bep"),
-            Map.entry("lamp", "Den"),
-            Map.entry("mattress", "Nem"),
-            Map.entry("microwave_oven", "Lo vi song"),
-            Map.entry("mirror", "Guong"),
-            Map.entry("music_stool", "Ghe am nhac"),
-            Map.entry("oil_lamp", "Den dau"),
-            Map.entry("oven", "Lo nuong"),
-            Map.entry("pew_(church_bench)", "Ghe bang"),
-            Map.entry("poker_(fire_stirring_tool)", "Cay cui lua"),
-            Map.entry("pool_table", "Ban bi a"),
-            Map.entry("recliner", "Ghe tua"),
-            Map.entry("refrigerator", "Tu lanh"),
-            Map.entry("rocking_chair", "Ghe bap benh"),
-            Map.entry("sink", "Bon rua"),
+            Map.entry("bed", "Giường"),
+            Map.entry("cabinet", "Tủ"),
+            Map.entry("chair", "Ghế"),
+            Map.entry("table", "Bàn"),
+            Map.entry("desk", "Bàn làm việc"),
             Map.entry("sofa", "Sofa"),
-            Map.entry("sofa_bed", "Giuong sofa"),
-            Map.entry("step_stool", "Ghe bac"),
-            Map.entry("stool", "Ghe don"),
-            Map.entry("stove", "Bep"),
-            Map.entry("table", "Ban"),
-            Map.entry("table-tennis_table", "Ban bong ban"),
-            Map.entry("table_lamp", "Den ban"),
-            Map.entry("television_camera", "May quay"),
-            Map.entry("television_set", "Tivi"),
-            Map.entry("toaster_oven", "Lo nuong banh"),
-            Map.entry("vacuum_cleaner", "May hut bui"),
-            Map.entry("wardrobe", "Tu quan ao"),
-            Map.entry("water_faucet", "Voi nuoc")
+            Map.entry("blender", "Máy xay sinh tố"),
+            Map.entry("dishwasher", "Máy rửa chén"),
+            Map.entry("fan", "Quạt"),
+            Map.entry("kettle", "Ấm đun nước"),
+            Map.entry("lamp", "Đèn"),
+            Map.entry("microwave", "Lò vi sóng"),
+            Map.entry("mirror", "Gương"),
+            Map.entry("oven_stove", "Lò nướng/Bếp"),
+            Map.entry("refrigerator", "Tủ lạnh"),
+            Map.entry("sink", "Bồn rửa"),
+            Map.entry("faucet", "Vòi nước"),
+            Map.entry("television", "Tivi"),
+            Map.entry("toaster", "Máy nướng bánh mì"),
+            Map.entry("washing_machine", "Máy giặt")
     );
+
+    /**
+     * True when ai-service did not confidently recognize any object in the image
+     * (empty detections or the {@code unknown} sentinel). Callers must not fabricate a name in this case.
+     */
+    public boolean isUnrecognized(PredictResponseDTO aiMetadata) {
+        if (aiMetadata == null) {
+            return true;
+        }
+        boolean hasDetection = aiMetadata.getDetections() != null && aiMetadata.getDetections().stream()
+                .anyMatch(detection -> StringUtils.hasText(detection.getLabel()));
+        boolean hasUsableLabel = StringUtils.hasText(aiMetadata.getLabel())
+                && !UNKNOWN_LABEL.equalsIgnoreCase(aiMetadata.getLabel().trim());
+        return !hasDetection && !hasUsableLabel;
+    }
 
     public String resolveTitle(String requestedTitle, List<DetectionDTO> detections) {
         if (StringUtils.hasText(requestedTitle)) {
             return requestedTitle.trim();
+        }
+        if (detections == null) {
+            return "";
         }
 
         return detections.stream()
@@ -77,16 +68,22 @@ public class ProductNamingSupport {
                         left.getScore() != null ? left.getScore() : 0.0,
                         right.getScore() != null ? right.getScore() : 0.0
                 ))
-                .map(DetectionDTO::getLabel)
-                .map(this::humanizeLabel)
-                .orElse("Unknown product");
+                .map(this::nameOfDetection)
+                .orElse("");
     }
 
     public String resolveSuggestedName(String label) {
-        if (!StringUtils.hasText(label)) {
-            return "Unknown product";
+        if (!StringUtils.hasText(label) || UNKNOWN_LABEL.equalsIgnoreCase(label.trim())) {
+            return "";
         }
         return humanizeLabel(label);
+    }
+
+    private String nameOfDetection(DetectionDTO detection) {
+        if (StringUtils.hasText(detection.getTranslatedLabel())) {
+            return detection.getTranslatedLabel().trim();
+        }
+        return humanizeLabel(detection.getLabel());
     }
 
     private String humanizeLabel(String label) {
@@ -98,7 +95,7 @@ public class ProductNamingSupport {
 
         String normalized = normalizedKey.replace('_', ' ').replace('-', ' ').trim();
         if (normalized.isBlank()) {
-            return "Unknown product";
+            return "";
         }
         return Character.toUpperCase(normalized.charAt(0)) + normalized.substring(1);
     }

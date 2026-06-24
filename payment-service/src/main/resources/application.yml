@@ -1,0 +1,70 @@
+server:
+  port: ${SERVER_PORT:8087}
+
+spring:
+  application:
+    name: payment-service
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://payment-postgres-db:5432/hsmart_payment_db}
+    username: ${SPRING_DATASOURCE_USERNAME:hsmart}
+    password: ${SPRING_DATASOURCE_PASSWORD:hsmart_password}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    open-in-view: false
+
+order-service:
+  base-url: ${ORDER_SERVICE_BASE_URL:http://order-service}
+  connect-timeout-ms: ${ORDER_SERVICE_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${ORDER_SERVICE_READ_TIMEOUT_MS:5000}
+
+vnpay:
+  pay-url: ${VNPAY_PAY_URL:https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
+  tmn-code: ${VNPAY_TMN_CODE:}
+  hash-secret: ${VNPAY_HASH_SECRET:}
+  return-url: ${VNPAY_RETURN_URL:http://localhost:8000/api/v1/payments/vnpay/return}
+  result-redirect-url: ${VNPAY_RESULT_REDIRECT_URL:http://localhost:5173/payment-result}
+  version: ${VNPAY_VERSION:2.1.0}
+  command: ${VNPAY_COMMAND:pay}
+  locale: ${VNPAY_LOCALE:vn}
+  currency-code: ${VNPAY_CURRENCY_CODE:VND}
+  order-type: ${VNPAY_ORDER_TYPE:other}
+  expire-minutes: ${VNPAY_EXPIRE_MINUTES:15}
+
+payments:
+  pending-timeout-minutes: ${PAYMENT_PENDING_TIMEOUT_MINUTES:30}
+  pending-timeout-scan-ms: ${PAYMENT_PENDING_TIMEOUT_SCAN_MS:60000}
+
+internal:
+  security:
+    enabled: ${INTERNAL_SECURITY_ENABLED:true}
+    secret: ${INTERNAL_SHARED_SECRET:}
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_CLIENT_SERVICEURL_DEFAULTZONE:http://discovery-server:8761/eureka/}
+    register-with-eureka: true
+    fetch-registry: true
+  instance:
+    prefer-ip-address: true
+    instance-id: ${spring.application.name}:${server.port}
+
+logging:
+  logstash:
+    host: ${LOGSTASH_HOST:localhost}
+    port: ${LOGSTASH_PORT:5044}
+  level:
+    com.hsmart.payment: INFO
+
+management:
+  tracing:
+    sampling:
+      probability: ${MANAGEMENT_TRACING_SAMPLING_PROBABILITY:1.0}
+  zipkin:
+    tracing:
+      endpoint: ${MANAGEMENT_ZIPKIN_TRACING_ENDPOINT:http://localhost:9411/api/v2/spans}

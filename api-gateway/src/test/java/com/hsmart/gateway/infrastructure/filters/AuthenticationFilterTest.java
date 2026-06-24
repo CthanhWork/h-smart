@@ -87,6 +87,25 @@ class AuthenticationFilterTest {
     }
 
     @Test
+    void shouldBypassAuthenticationForPublicInteractionMediaPath() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/interactions/media/chat-image.jpg").build()
+        );
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertTrue(chainCalled.get());
+        verifyNoInteractions(jwtService);
+    }
+
+    @Test
     void shouldBypassAuthenticationForGhtkWebhookPath() {
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.post("/api/v1/orders/internal/ghtk-webhook?hash=webhook-secret").build()
@@ -201,7 +220,7 @@ class AuthenticationFilterTest {
     }
 
     @Test
-    void shouldRequireAuthenticationForNonNumericProductSubpath() {
+    void shouldBlockInternalProductPathAtGateway() {
         MockServerWebExchange exchange = MockServerWebExchange.from(
                 MockServerHttpRequest.get("/api/v1/products/internal/stats").build()
         );
@@ -216,7 +235,50 @@ class AuthenticationFilterTest {
         filter.filter(exchange, chain).block();
 
         assertFalse(chainCalled.get());
-        assertEquals(401, exchange.getResponse().getStatusCode().value());
+        assertEquals(403, exchange.getResponse().getStatusCode().value());
+        assertTrue(exchange.getResponse().getBodyAsString().block().contains("\"message\":\"Internal routes are not accessible through the gateway\""));
+    }
+
+    @Test
+    void shouldBlockInternalReviewAdminListEvenForPublicGet() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.get("/api/v1/reviews/internal/admin/list").build()
+        );
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertFalse(chainCalled.get());
+        assertEquals(403, exchange.getResponse().getStatusCode().value());
+        verifyNoInteractions(jwtService);
+    }
+
+    @Test
+    void shouldBlockInternalOrderPathEvenForAdminToken() {
+        MockServerWebExchange exchange = MockServerWebExchange.from(
+                MockServerHttpRequest.post("/api/v1/orders/internal/admin/99/cancel")
+                        .header(HttpHeaders.AUTHORIZATION, "Bearer admin-token")
+                        .build()
+        );
+
+        AtomicBoolean chainCalled = new AtomicBoolean(false);
+        GatewayFilterChain chain = serverWebExchange -> {
+            chainCalled.set(true);
+            return Mono.empty();
+        };
+
+        GatewayFilter filter = filterFactory.apply(new AuthenticationFilter.Config());
+        filter.filter(exchange, chain).block();
+
+        assertFalse(chainCalled.get());
+        assertEquals(403, exchange.getResponse().getStatusCode().value());
+        verifyNoInteractions(jwtService);
     }
 
     @Test

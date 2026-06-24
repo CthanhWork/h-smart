@@ -29,7 +29,4 @@ public class UpdateProfileRequestDTO {
 
     @Schema(example = "12 Nguyen Van Nghi Street")
     private String streetDetail;
-
-    @Schema(example = "https://example.com/avatar-new.jpg")
-    private String avatarUrl;
 }

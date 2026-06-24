@@ -18,9 +18,13 @@ public class Notification {
     @Id
     private String id;
     private String userId;
+    private String title;
     private String type;
     private String message;
     private Long productId;
+    private Long orderId;
+    private Long offerId;
+    private String senderId;
     private boolean read;
     private Instant timestamp;
 }

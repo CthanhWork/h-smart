@@ -1,12 +1,16 @@
 package com.hsmart.backend.service.impl;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.hsmart.backend.application.dto.DetectionDTO;
 import com.hsmart.backend.application.dto.ImageAnalysisResponseDTO;
+import com.hsmart.backend.application.dto.PredictResponseDTO;
 import com.hsmart.backend.application.dto.ProductListingSuggestionResponseDTO;
 import com.hsmart.backend.infrastructure.context.UserContextHolder;
 import com.hsmart.backend.service.ProductImageAnalysisService;
 import com.hsmart.backend.service.ProductListingSuggestionService;
 import java.math.BigDecimal;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -30,6 +34,16 @@ public class ProductListingSuggestionServiceImpl implements ProductListingSugges
     private static final String DEFAULT_CONDITION = "Used";
     private static final int MAX_SUGGESTED_TITLE_LENGTH = 120;
 
+    // Varied, natural-sounding listing titles. The recognized name is always placed first so the
+    // sentence never breaks Vietnamese capitalization, and a template is chosen deterministically
+    // from the name so the same product type reads consistently (and stays unit-testable).
+    private static final List<String> TITLE_TEMPLATES = List.of(
+            "%s cũ, còn dùng tốt – cần thanh lý",
+            "%s đã qua sử dụng, còn đẹp và hoạt động ổn định",
+            "%s second-hand, giá tốt cho người cần dùng",
+            "%s cũ thanh lý, hợp cho gia đình hoặc nhà trọ"
+    );
+
     private final ProductImageAnalysisService productImageAnalysisService;
     private final RestTemplate restTemplate;
 
@@ -38,6 +52,9 @@ public class ProductListingSuggestionServiceImpl implements ProductListingSugges
 
     @Value("${internal.security.secret:}")
     private String internalSharedSecret;
+
+    @Value("${product.naming.confident-threshold:0.6}")
+    private double confidentThreshold;
 
     @Override
     public ProductListingSuggestionResponseDTO prepareListing(MultipartFile file) {
@@ -56,14 +73,36 @@ public class ProductListingSuggestionServiceImpl implements ProductListingSugges
     private String buildDetailedSuggestedTitle(ImageAnalysisResponseDTO imageAnalysis) {
         String baseName = normalizeText(imageAnalysis.getSuggestedName());
         if (!StringUtils.hasText(baseName)) {
+            // AI recognized nothing — never fabricate a title, let the seller name it themselves.
             return "";
         }
 
-        String category = resolveCategory(imageAnalysis);
-        String title = isSameText(baseName, category)
-                ? baseName + " đã qua sử dụng, phù hợp dùng trong gia đình"
-                : baseName + " đã qua sử dụng, nhóm " + category.toLowerCase() + ", phù hợp dùng trong gia đình";
-        return limitLength(title, MAX_SUGGESTED_TITLE_LENGTH);
+        // Low-confidence guess: offer only the bare name so we do not dress up an uncertain detection.
+        if (bestConfidence(imageAnalysis.getAiMetadata()) < confidentThreshold) {
+            return limitLength(baseName, MAX_SUGGESTED_TITLE_LENGTH);
+        }
+
+        return limitLength(naturalTitle(baseName), MAX_SUGGESTED_TITLE_LENGTH);
+    }
+
+    private String naturalTitle(String baseName) {
+        int index = Math.floorMod(baseName.toLowerCase(Locale.ROOT).hashCode(), TITLE_TEMPLATES.size());
+        return String.format(TITLE_TEMPLATES.get(index), baseName);
+    }
+
+    private double bestConfidence(PredictResponseDTO aiMetadata) {
+        if (aiMetadata == null) {
+            return 0.0;
+        }
+        double best = aiMetadata.getConfidence() != null ? aiMetadata.getConfidence() : 0.0;
+        if (aiMetadata.getDetections() != null) {
+            for (DetectionDTO detection : aiMetadata.getDetections()) {
+                if (detection.getScore() != null) {
+                    best = Math.max(best, detection.getScore());
+                }
+            }
+        }
+        return best;
     }
 
     private String generateDescription(String suggestedTitle, ImageAnalysisResponseDTO imageAnalysis) {
@@ -122,10 +161,6 @@ public class ProductListingSuggestionServiceImpl implements ProductListingSugges
 
     private String normalizeText(String value) {
         return StringUtils.hasText(value) ? value.trim() : "";
-    }
-
-    private boolean isSameText(String first, String second) {
-        return normalizeText(first).equalsIgnoreCase(normalizeText(second));
     }
 
     private String limitLength(String value, int maxLength) {

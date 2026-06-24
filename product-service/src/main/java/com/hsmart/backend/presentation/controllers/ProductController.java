@@ -110,12 +110,15 @@ public class ProductController {
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Product listing suggestions prepared successfully", response));
     }
 
-    @PutMapping("/{id}")
+    @PutMapping(value = "/{id}", consumes = {MediaType.MULTIPART_FORM_DATA_VALUE, MediaType.APPLICATION_FORM_URLENCODED_VALUE})
     public ResponseEntity<ApiResponse<ProductResponseDTO>> updateProduct(
             @PathVariable Long id,
-            @Valid @ModelAttribute ProductRequestDTO request
-    ) {
-        ProductResponseDTO response = productService.updateProduct(id, request);
+            @Valid @ModelAttribute ProductRequestDTO request,
+            @RequestPart(name = "files", required = false) List<MultipartFile> files,
+            @RequestPart(name = "file", required = false) MultipartFile file
+    ) throws IOException {
+        List<MultipartFile> newImages = normalizeFiles(files, file);
+        ProductResponseDTO response = productService.updateProduct(id, request, newImages.isEmpty() ? null : newImages);
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Product updated successfully", response));
     }
 
@@ -145,6 +148,16 @@ public class ProductController {
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, message, null));
     }
 
+    @GetMapping("/mine")
+    public ResponseEntity<ApiResponse<PageResponseDTO<ProductResponseDTO>>> getMyProducts(
+            @ParameterObject
+            @PageableDefault(sort = "id", direction = Sort.Direction.DESC) Pageable pageable
+    ) {
+        return ResponseEntity.ok(
+                ApiResponse.success(HttpStatus.OK, "My products fetched successfully", productService.getMyProducts(pageable))
+        );
+    }
+
     @GetMapping("/wishlist")
     public ResponseEntity<ApiResponse<PageResponseDTO<ProductResponseDTO>>> getWishlist(
             @ParameterObject
@@ -159,6 +172,13 @@ public class ProductController {
     public ResponseEntity<ApiResponse<ProductResponseDTO>> getProductById(@PathVariable Long id) {
         return ResponseEntity.ok(
                 ApiResponse.success(HttpStatus.OK, "Product fetched successfully", productService.getProductById(id))
+        );
+    }
+
+    @GetMapping("/internal/{id}")
+    public ResponseEntity<ApiResponse<ProductResponseDTO>> getProductByIdForAdmin(@PathVariable Long id) {
+        return ResponseEntity.ok(
+                ApiResponse.success(HttpStatus.OK, "Product fetched successfully", productService.getProductByIdForAdmin(id))
         );
     }
 

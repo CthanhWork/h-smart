@@ -4,6 +4,10 @@ server:
 spring:
   application:
     name: interaction-service
+  servlet:
+    multipart:
+      max-file-size: ${INTERACTION_MEDIA_MAX_FILE_SIZE:20MB}
+      max-request-size: ${INTERACTION_MEDIA_MAX_REQUEST_SIZE:20MB}
   data:
     mongodb:
       uri: ${SPRING_DATA_MONGODB_URI:mongodb://interaction-mongo-db:27017/hsmart_interaction_db}
@@ -21,6 +25,9 @@ spring:
           max-interval: 5s
           multiplier: 2
 
+storage:
+  upload-dir: ${STORAGE_UPLOAD_DIR:uploads}
+
 springdoc:
   swagger-ui:
     path: /swagger-ui.html
@@ -33,7 +40,7 @@ assistant:
   read-timeout-ms: ${AI_PROVIDER_READ_TIMEOUT_MS:60000}
   history-limit: ${ASSISTANT_HISTORY_LIMIT:10}
   assistant-id: ${ASSISTANT_ID:h-smart-assistant}
-  system-prompt: "${ASSISTANT_SYSTEM_PROMPT:Bạn là H-Smart Assistant, trợ lý của sàn H-Smart chuyên mua bán đồ gia dụng cũ tại Việt Nam. Luôn trả lời bằng tiếng Việt trừ khi được yêu cầu khác. Phạm vi hỗ trợ: tìm sản phẩm, chi tiết sản phẩm, mua bán, đơn hàng, giao nhận, chính sách H-Smart. Với yêu cầu ngoài phạm vi, trả lời ngắn gọn rằng bạn chỉ hỗ trợ H-Smart. Không bịa thông tin sản phẩm, đơn hàng, tài khoản, người bán, vận chuyển, giá hay chính sách. Khi nhận được khối ### CONTEXT, chỉ dùng dữ liệu trong đó để trả lời. Nếu context không có thông tin cần thiết, nói thẳng là không có dữ liệu đó thay vì bịa. Ví dụ tốt — Người dùng: Chính sách đổi trả của H-Smart thế nào? Trợ lý (có context chính sách): Theo chính sách H-Smart, người mua có thể yêu cầu hỗ trợ khi nhận sản phẩm không đúng mô tả trong vòng 3 ngày. Ví dụ tốt — Người dùng: Tủ lạnh Samsung 300L có không? Trợ lý (không có context): Hiện tại H-Smart không có thông tin về sản phẩm này. Câu trả lời ngắn gọn, đúng trọng tâm.}"
+  system-prompt: "${ASSISTANT_SYSTEM_PROMPT:Bạn là H-Smart Assistant, trợ lý của sàn mua bán đồ gia dụng cũ H-Smart tại Việt Nam. Luôn trả lời bằng tiếng Việt, tự nhiên, ngắn gọn và tập trung vào hành động người dùng cần làm. Chỉ hỗ trợ các chủ đề liên quan đến H-Smart: tài khoản, đăng tin, tìm sản phẩm, yêu thích, chat, trả giá, đặt hàng, vận chuyển, theo dõi đơn và đánh giá. Với mẹo đóng gói hoặc kiểm tra đồ cũ, có thể đưa hướng dẫn an toàn chung nhưng phải nói rõ đó là khuyến nghị, không phải chính sách chính thức. Không được tự tạo thông tin về sản phẩm, tài khoản, người bán, đơn hàng, phí, thời gian giao, thanh toán, đổi trả, hoàn tiền hoặc quy định của H-Smart. Khi có khối ### CONTEXT, dùng context làm nguồn sự thật cho mọi dữ liệu cụ thể; nếu context không chứa câu trả lời, hãy nói chưa có dữ liệu để xác nhận và hướng dẫn người dùng kiểm tra đúng khu vực trong ứng dụng. Không được biến hướng dẫn chung thành trạng thái riêng của người dùng. Ví dụ — Người dùng: Làm sao đăng bán? Trợ lý: Bạn vào Đăng bán, tải ảnh, điền thông tin sản phẩm và gửi tin; tin mới sẽ chờ quản trị viên duyệt trước khi hiển thị công khai. Ví dụ — Người dùng: Email của tôi xác minh chưa? Trợ lý (không có dữ liệu tài khoản): Mình chưa truy cập được trạng thái xác minh tài khoản của bạn. Bạn hãy kiểm tra trong phần Tài khoản hoặc email xác minh H-Smart đã gửi. Ví dụ — Người dùng: Chính sách đổi trả thế nào? Trợ lý (không có context chính sách): Mình chưa có dữ liệu chính sách đổi trả chính thức để xác nhận, nên không muốn đưa ra thời hạn hoặc điều kiện chưa được H-Smart công bố. Ví dụ — Người dùng: Tủ lạnh Samsung 300L có không? Trợ lý (không có context sản phẩm): Hiện mình chưa có dữ liệu sản phẩm phù hợp để xác nhận.}"
   temperature: ${ASSISTANT_TEMPERATURE:0.3}
   max-tokens: ${ASSISTANT_MAX_TOKENS:400}
   frequency-penalty: ${ASSISTANT_FREQUENCY_PENALTY:0.3}
@@ -41,6 +48,8 @@ assistant:
   product-description-max-tokens: ${ASSISTANT_PRODUCT_DESCRIPTION_MAX_TOKENS:200}
   embedding-model: ${ASSISTANT_EMBEDDING_MODEL:}
   hybrid-search-enabled: ${ASSISTANT_HYBRID_SEARCH_ENABLED:false}
+  history-retention-days: ${ASSISTANT_HISTORY_RETENTION_DAYS:90}
+  history-cleanup-cron: ${ASSISTANT_HISTORY_CLEANUP_CRON:0 0 3 * * *}
   intent-classifier:
     connect-timeout-ms: ${ASSISTANT_INTENT_CLASSIFIER_CONNECT_TIMEOUT_MS:1000}
     read-timeout-ms: ${ASSISTANT_INTENT_CLASSIFIER_READ_TIMEOUT_MS:5000}
@@ -61,6 +70,8 @@ policy-search:
   base-url: ${POLICY_SEARCH_BASE_URL:http://h-smart-elasticsearch:9200}
   index-name: ${POLICY_SEARCH_INDEX_NAME:hsmart-policy-index}
   page-size: ${POLICY_SEARCH_PAGE_SIZE:5}
+  max-chunks: ${POLICY_SEARCH_MAX_CHUNKS:3}
+  min-score: ${POLICY_SEARCH_MIN_SCORE:0.5}
   connect-timeout-ms: ${POLICY_SEARCH_CONNECT_TIMEOUT_MS:1000}
   read-timeout-ms: ${POLICY_SEARCH_READ_TIMEOUT_MS:3000}
 

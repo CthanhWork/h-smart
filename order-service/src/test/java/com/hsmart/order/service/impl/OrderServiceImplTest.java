@@ -16,6 +16,7 @@ import com.hsmart.order.application.dto.GhtkShipmentRequestDTO;
 import com.hsmart.order.application.dto.GhtkWebhookRequestDTO;
 import com.hsmart.order.application.dto.OfferResponseDTO;
 import com.hsmart.order.application.dto.OrderResponseDTO;
+import com.hsmart.order.application.dto.PageResponseDTO;
 import com.hsmart.order.application.dto.ProductResponseDTO;
 import com.hsmart.order.application.dto.ShippingEstimateResponseDTO;
 import com.hsmart.order.application.dto.UserAddressResponseDTO;
@@ -26,7 +27,10 @@ import com.hsmart.order.domain.entities.OfferStatus;
 import com.hsmart.order.domain.entities.Order;
 import com.hsmart.order.domain.entities.OrderStatus;
 import com.hsmart.order.domain.entities.ProductOffer;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hsmart.order.infrastructure.config.ApplicationProperties;
 import com.hsmart.order.infrastructure.config.GhtkProperties;
+import com.hsmart.order.infrastructure.config.StorageProperties;
 import com.hsmart.order.infrastructure.messaging.OrderEventPublisher;
 import com.hsmart.order.infrastructure.persistence.OrderRepository;
 import com.hsmart.order.infrastructure.persistence.ProductOfferRepository;
@@ -43,6 +47,9 @@ import org.mockito.Mock;
 import org.mockito.ArgumentCaptor;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.mock.web.MockMultipartFile;
+import org.springframework.data.domain.PageImpl;
+import org.springframework.data.domain.Pageable;
 import org.springframework.test.util.ReflectionTestUtils;
 
 @ExtendWith(MockitoExtension.class)
@@ -72,6 +79,9 @@ class OrderServiceImplTest {
     @Mock
     private NotificationClient notificationClient;
 
+    @Mock
+    private com.hsmart.order.service.PaymentClient paymentClient;
+
     private OrderServiceImpl orderService;
 
     @BeforeEach
@@ -84,10 +94,16 @@ class OrderServiceImplTest {
                 java.util.List.of(ghtkClient, viettelPostClient),
                 orderEventPublisher,
                 ghtkProperties(),
-                notificationClient
+                notificationClient,
+                paymentClient,
+                new StorageProperties(System.getProperty("java.io.tmpdir") + "/hsmart-order-test-uploads"),
+                new ApplicationProperties("http://localhost:8000"),
+                new ObjectMapper()
         );
         lenient().when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(orderRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
         lenient().when(productOfferRepository.save(any(ProductOffer.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        lenient().when(productOfferRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
         lenient().when(ghtkClient.deliveryMethod()).thenReturn(DeliveryMethod.GHTK);
         lenient().when(viettelPostClient.deliveryMethod()).thenReturn(DeliveryMethod.VIETTEL_POST);
     }
@@ -103,11 +119,12 @@ class OrderServiceImplTest {
         given(userClient.getUserAddress("buyer-one")).willReturn(buyerAddress);
         given(ghtkClient.createShipment(any(GhtkShipmentRequestDTO.class))).willReturn("S1.A1.12345");
 
-        OrderResponseDTO response = orderService.confirmOrder(5L, "seller-one");
+        OrderResponseDTO response = orderService.confirmOrder(5L, "seller-one", evidenceImages());
 
         ArgumentCaptor<GhtkShipmentRequestDTO> requestCaptor = ArgumentCaptor.forClass(GhtkShipmentRequestDTO.class);
         verify(ghtkClient).createShipment(requestCaptor.capture());
-        assertThat(requestCaptor.getValue().codAmount()).isEqualByComparingTo("130000");
+        // COD now collects product amount only (shipping was prepaid as the deposit)
+        assertThat(requestCaptor.getValue().codAmount()).isEqualByComparingTo("100000");
         assertThat(requestCaptor.getValue().productValue()).isEqualByComparingTo("100000");
         assertThat(response.getStatus()).isEqualTo(OrderStatus.PROCESSING);
         assertThat(response.getTrackingCode()).isEqualTo("S1.A1.12345");
@@ -125,7 +142,7 @@ class OrderServiceImplTest {
         given(userClient.getUserAddress("buyer-one")).willReturn(buyerAddress);
         given(viettelPostClient.createShipment(any(GhtkShipmentRequestDTO.class))).willReturn("VTP123456");
 
-        OrderResponseDTO response = orderService.confirmOrder(5L, "seller-one");
+        OrderResponseDTO response = orderService.confirmOrder(5L, "seller-one", evidenceImages());
 
         verify(viettelPostClient).createShipment(any(GhtkShipmentRequestDTO.class));
         verify(ghtkClient, never()).createShipment(any(GhtkShipmentRequestDTO.class));
@@ -137,7 +154,7 @@ class OrderServiceImplTest {
     void confirmOrderShouldRejectCallerWhoIsNotSeller() {
         given(orderRepository.findById(5L)).willReturn(java.util.Optional.of(pendingOrder()));
 
-        assertThatThrownBy(() -> orderService.confirmOrder(5L, "another-seller"))
+        assertThatThrownBy(() -> orderService.confirmOrder(5L, "another-seller", evidenceImages()))
                 .isInstanceOf(com.hsmart.order.application.exceptions.OrderStateException.class)
                 .hasMessage("Only the seller can confirm this order");
     }
@@ -279,18 +296,53 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void createOfferShouldRejectDiscountAboveThirtyPercent() {
-        given(productClient.getProduct(10L, "buyer-one")).willReturn(product());
+    void createOfferShouldRejectWhenProductNotNegotiable() {
+        given(productClient.getProduct(10L, "buyer-one"))
+                .willReturn(negotiableProduct(false, null));
 
         assertThatThrownBy(() -> orderService.createOffer(
                 CreateOfferRequestDTO.builder()
                         .productId(10L)
-                        .discountPercent(31)
+                        .discountPercent(10)
                         .build(),
                 "buyer-one"
         ))
                 .isInstanceOf(com.hsmart.order.application.exceptions.OrderStateException.class)
-                .hasMessage("Offer discount cannot exceed 30 percent");
+                .hasMessage("This product is not open to offers");
+    }
+
+    @Test
+    void createOfferShouldRejectOfferBelowSellerMinimum() {
+        given(productClient.getProduct(10L, "buyer-one"))
+                .willReturn(negotiableProduct(true, BigDecimal.valueOf(95000)));
+
+        assertThatThrownBy(() -> orderService.createOffer(
+                CreateOfferRequestDTO.builder()
+                        .productId(10L)
+                        .discountPercent(10)
+                        .build(),
+                "buyer-one"
+        ))
+                .isInstanceOf(com.hsmart.order.application.exceptions.OrderStateException.class)
+                .hasMessage("Offer price is below the seller's minimum acceptable price");
+    }
+
+    @Test
+    void createOfferShouldAllowDiscountAboveThirtyPercentWhenAboveMinimum() {
+        given(productClient.getProduct(10L, "buyer-one"))
+                .willReturn(negotiableProduct(true, BigDecimal.valueOf(50000)));
+        when(productOfferRepository.save(any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        OfferResponseDTO response = orderService.createOffer(
+                CreateOfferRequestDTO.builder()
+                        .productId(10L)
+                        .discountPercent(40)
+                        .build(),
+                "buyer-one"
+        );
+
+        assertThat(response.getOfferPrice()).isEqualByComparingTo("60000");
+        assertThat(response.getDiscountPercent()).isEqualTo(40);
     }
 
     @Test
@@ -329,8 +381,22 @@ class OrderServiceImplTest {
     }
 
     @Test
-    void createOrderShouldRejectProductThatIsOnlyActive() {
+    void createOrderShouldAllowProductWithActiveStatus() {
+        UserAddressResponseDTO sellerAddress = address("seller-one", "District 1");
+        UserAddressResponseDTO buyerAddress = address("buyer-one", "Thu Duc City");
         given(productClient.getProduct(10L, "buyer-one")).willReturn(activeProduct());
+        given(userClient.getUserAddress("seller-one")).willReturn(sellerAddress);
+        given(userClient.getUserAddress("buyer-one")).willReturn(buyerAddress);
+        given(ghtkClient.calculateShippingFee(sellerAddress, buyerAddress)).willReturn(BigDecimal.valueOf(30000));
+
+        OrderResponseDTO response = orderService.createOrder(ghtkOrderRequest(10L), "buyer-one");
+
+        assertThat(response.getStatus()).isEqualTo(OrderStatus.PENDING);
+    }
+
+    @Test
+    void createOrderShouldRejectProductWithPendingReviewStatus() {
+        given(productClient.getProduct(10L, "buyer-one")).willReturn(pendingReviewProduct());
 
         assertThatThrownBy(() -> orderService.createOrder(ghtkOrderRequest(10L), "buyer-one"))
                 .isInstanceOf(com.hsmart.order.application.exceptions.ProductUnavailableException.class)
@@ -399,7 +465,11 @@ class OrderServiceImplTest {
                 java.util.List.of(ghtkClient),
                 orderEventPublisher,
                 ghtkProperties(),
-                notificationClient
+                notificationClient,
+                paymentClient,
+                new StorageProperties(System.getProperty("java.io.tmpdir") + "/hsmart-order-test-uploads"),
+                new ApplicationProperties("http://localhost:8000"),
+                new ObjectMapper()
         );
         given(productClient.getProduct(10L, "buyer-one")).willReturn(product());
         CreateOrderRequestDTO request = CreateOrderRequestDTO.builder()
@@ -423,15 +493,16 @@ class OrderServiceImplTest {
         buyingOrder.setBuyerId("demo_seller_001");
         buyingOrder.setSellerId("another-seller");
         given(orderRepository.findByBuyerIdOrSellerIdOrderByCreatedAtDescIdDesc(
-                "demo_seller_001",
-                "demo_seller_001"
-        )).willReturn(java.util.List.of(sellingOrder, buyingOrder));
+                eq("demo_seller_001"),
+                eq("demo_seller_001"),
+                any(Pageable.class)
+        )).willReturn(new PageImpl<>(java.util.List.of(sellingOrder, buyingOrder)));
 
-        java.util.List<OrderResponseDTO> response = orderService.getOrdersForCurrentUser("demo_seller_001");
+        PageResponseDTO<OrderResponseDTO> response = orderService.getOrdersForCurrentUser("demo_seller_001", Pageable.unpaged());
 
-        assertThat(response).extracting(OrderResponseDTO::getId).containsExactly(6L, 7L);
-        assertThat(response.get(0).getSellerId()).isEqualTo("demo_seller_001");
-        assertThat(response.get(1).getBuyerId()).isEqualTo("demo_seller_001");
+        assertThat(response.getContent()).extracting(OrderResponseDTO::getId).containsExactly(6L, 7L);
+        assertThat(response.getContent().get(0).getSellerId()).isEqualTo("demo_seller_001");
+        assertThat(response.getContent().get(1).getBuyerId()).isEqualTo("demo_seller_001");
     }
 
     @Test
@@ -474,19 +545,74 @@ class OrderServiceImplTest {
 
         assertThatThrownBy(() -> orderService.cancelOrder(5L, "buyer-one"))
                 .isInstanceOf(com.hsmart.order.application.exceptions.OrderStateException.class)
-                .hasMessage("Only pending orders can be cancelled");
+                .hasMessageContaining("cancel");
         assertThat(order.getStatus()).isEqualTo(OrderStatus.CANCELLED);
         verify(orderRepository).save(order);
     }
 
     @Test
-    void cancelExpiredPendingOrdersShouldCancelStalePendingRows() {
+    void cancelExpiredPendingOrdersShouldCancelStalePendingRowsAndNotifyParties() {
+        Order expired = pendingOrder();
         ReflectionTestUtils.setField(orderService, "pendingTimeoutMinutes", 30L);
-        given(orderRepository.cancelExpiredPendingOrders(any())).willReturn(3);
+        given(orderRepository.findPendingOrdersExpiredBefore(any())).willReturn(java.util.List.of(expired));
 
         orderService.cancelExpiredPendingOrders();
 
-        verify(orderRepository).cancelExpiredPendingOrders(any());
+        assertThat(expired.getStatus()).isEqualTo(OrderStatus.CANCELLED);
+        verify(orderRepository).saveAll(any());
+        verify(notificationClient).sendOrderCancelledNotification(any());
+    }
+
+    @Test
+    void requestReturnShouldMoveCompletedOrderToReturnRequested() {
+        given(orderRepository.findById(5L)).willReturn(java.util.Optional.of(completedOrder()));
+
+        OrderResponseDTO response = orderService.requestReturn(5L, "buyer-one", "San pham bi loi");
+
+        assertThat(response.getStatus()).isEqualTo(OrderStatus.RETURN_REQUESTED);
+        assertThat(response.getReturnReason()).isEqualTo("San pham bi loi");
+    }
+
+    @Test
+    void requestReturnShouldRejectWhenOrderNotCompleted() {
+        given(orderRepository.findById(5L)).willReturn(java.util.Optional.of(pendingOrder()));
+
+        assertThatThrownBy(() -> orderService.requestReturn(5L, "buyer-one", "x"))
+                .isInstanceOf(com.hsmart.order.application.exceptions.OrderStateException.class);
+    }
+
+    @Test
+    void returnIsFinalizedOnlyAfterBothSellerAndAdminApprove() {
+        Order order = completedOrder();
+        order.setStatus(OrderStatus.RETURN_REQUESTED);
+        given(orderRepository.findById(5L)).willReturn(java.util.Optional.of(order));
+
+        OrderResponseDTO afterSeller = orderService.sellerApproveReturn(5L, "seller-one");
+        assertThat(afterSeller.getStatus()).isEqualTo(OrderStatus.RETURN_REQUESTED);
+        assertThat(afterSeller.isReturnSellerApproved()).isTrue();
+        verify(paymentClient, never()).refundDeposit(any());
+
+        OrderResponseDTO afterAdmin = orderService.adminApproveReturn(5L);
+        assertThat(afterAdmin.getStatus()).isEqualTo(OrderStatus.RETURNED);
+        verify(paymentClient).refundDeposit(5L);
+    }
+
+    private Order completedOrder() {
+        return Order.builder()
+                .id(5L)
+                .buyerId("buyer-one")
+                .sellerId("seller-one")
+                .productId(10L)
+                .amount(BigDecimal.valueOf(130000))
+                .shippingFee(BigDecimal.valueOf(30000))
+                .deliveryMethod(DeliveryMethod.GHTK)
+                .status(OrderStatus.COMPLETED)
+                .completedAt(java.time.LocalDateTime.now())
+                .build();
+    }
+
+    private java.util.List<org.springframework.web.multipart.MultipartFile> evidenceImages() {
+        return java.util.List.of(new MockMultipartFile("files", "evidence.jpg", "image/jpeg", new byte[]{1, 2, 3}));
     }
 
     private ProductResponseDTO product() {
@@ -499,7 +625,9 @@ class OrderServiceImplTest {
                 "seller-one",
                 1L,
                 "Kitchen appliance",
-                null
+                null,
+                true,
+                BigDecimal.valueOf(50000)
         );
     }
 
@@ -513,7 +641,9 @@ class OrderServiceImplTest {
                 sellerId,
                 1L,
                 "Kitchen appliance",
-                null
+                null,
+                true,
+                BigDecimal.valueOf(50000)
         );
     }
 
@@ -527,7 +657,25 @@ class OrderServiceImplTest {
                 "seller-one",
                 1L,
                 "Kitchen appliance",
-                null
+                null,
+                true,
+                BigDecimal.ZERO
+        );
+    }
+
+    private ProductResponseDTO negotiableProduct(boolean negotiable, BigDecimal minPrice) {
+        return new ProductResponseDTO(
+                10L,
+                "Rice cooker",
+                "Used rice cooker",
+                BigDecimal.valueOf(100000),
+                "APPROVED",
+                "seller-one",
+                1L,
+                "Kitchen appliance",
+                null,
+                negotiable,
+                minPrice
         );
     }
 
@@ -541,7 +689,25 @@ class OrderServiceImplTest {
                 "seller-one",
                 1L,
                 "Kitchen appliance",
-                null
+                null,
+                true,
+                BigDecimal.valueOf(50000)
+        );
+    }
+
+    private ProductResponseDTO pendingReviewProduct() {
+        return new ProductResponseDTO(
+                10L,
+                "Rice cooker",
+                "Used rice cooker",
+                BigDecimal.valueOf(100000),
+                "PENDING_REVIEW",
+                "seller-one",
+                1L,
+                "Kitchen appliance",
+                null,
+                true,
+                BigDecimal.valueOf(50000)
         );
     }
 

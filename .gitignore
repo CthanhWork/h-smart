@@ -31,7 +31,13 @@ logs/
 build/
 *.jar
 *.war
+*.tar.gz
 tmp/
+
+# Local tooling / session artifacts
+.claude/
+vnpay-*.html
+scripts/e2e-inspect.sh
 
 # Runtime data
 **/uploads/
@@ -54,6 +60,7 @@ docs/
 !docs/
 docs/*
 !docs/DEPLOYMENT-GUIDE.md
+!docs/assistant-knowledge-base.md
 *E2E*GUIDE*.md
 **/*E2E*GUIDE*.md
 *report*.md

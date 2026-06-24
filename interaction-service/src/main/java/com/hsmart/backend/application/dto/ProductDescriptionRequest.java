@@ -3,6 +3,7 @@ package com.hsmart.backend.application.dto;
 import jakarta.validation.constraints.DecimalMin;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Size;
 import java.math.BigDecimal;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
@@ -27,4 +28,7 @@ public class ProductDescriptionRequest {
     @NotNull
     @DecimalMin(value = "0.0", inclusive = true)
     private BigDecimal price;
+
+    @Size(max = 500, message = "sellerNotes must not exceed 500 characters")
+    private String sellerNotes;
 }

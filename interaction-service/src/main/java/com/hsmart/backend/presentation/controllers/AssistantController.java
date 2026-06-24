@@ -8,13 +8,17 @@ import com.hsmart.backend.application.dto.ProductDescriptionResponse;
 import com.hsmart.backend.application.exceptions.MissingUserContextException;
 import com.hsmart.backend.infrastructure.context.UserContextHolder;
 import com.hsmart.backend.service.AssistantService;
+import lombok.extern.slf4j.Slf4j;
 import jakarta.validation.Valid;
+import jakarta.validation.constraints.NotBlank;
+import jakarta.validation.constraints.Size;
 import java.util.List;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.util.StringUtils;
+import org.springframework.validation.annotation.Validated;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -24,6 +28,8 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
+@Slf4j
+@Validated
 @RestController
 @RequestMapping("/api/v1/assistant")
 @RequiredArgsConstructor
@@ -39,7 +45,9 @@ public class AssistantController {
     }
 
     @GetMapping(value = "/chat/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter streamChat(@RequestParam String message) {
+    public SseEmitter streamChat(
+            @RequestParam @NotBlank @Size(max = 2000, message = "message must not exceed 2000 characters") String message
+    ) {
         String currentUserId = requireCurrentUserId();
         return assistantService.streamChat(currentUserId, message);
     }
@@ -70,7 +78,8 @@ public class AssistantController {
     public ResponseEntity<ApiResponse<ProductDescriptionResponse>> generateDescription(
             @Valid @RequestBody ProductDescriptionRequest request
     ) {
-        requireCurrentUserId();
+        String currentUserId = requireCurrentUserId();
+        log.debug("Generating product description for user {}", currentUserId);
         ProductDescriptionResponse response = assistantService.generateProductDescription(request);
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Description generated successfully", response));
     }

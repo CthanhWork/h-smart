@@ -13,9 +13,12 @@ import lombok.NoArgsConstructor;
 public class ReviewResponseDTO {
     private Long id;
     private Long orderId;
+    private Long productId;
     private String buyerId;
     private String sellerId;
     private Integer rating;
     private String comment;
+    private boolean hidden;
     private LocalDateTime createdAt;
+    private LocalDateTime updatedAt;
 }

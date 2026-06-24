@@ -13,6 +13,7 @@ import lombok.NoArgsConstructor;
 @Schema(name = "AuthResponse", description = "Ket qua xac thuc va token JWT")
 public class AuthResponseDTO {
     private String accessToken;
+    private String refreshToken;
     private String tokenType;
     private UserProfileResponseDTO user;
 }

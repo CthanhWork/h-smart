@@ -56,7 +56,7 @@ class IntentClassifierTest {
     }
 
     @Test
-    void classifyShouldFallbackToGeneralWhenCircuitBreakerIsOpen() {
+    void classifyShouldUseLocalPolicyFallbackWhenCircuitBreakerIsOpen() {
         CircuitBreakerRegistry registry = CircuitBreakerRegistry.ofDefaults();
         CircuitBreaker circuitBreaker = registry.circuitBreaker(IntentClassifier.INTENT_CLASSIFIER_CIRCUIT_BREAKER);
         circuitBreaker.transitionToOpenState();
@@ -66,10 +66,10 @@ class IntentClassifierTest {
                 registry
         );
 
-        IntentClassification classification = classifier.classify("Kiem tra don hang giup toi");
+        IntentClassification classification = classifier.classify("Lam sao dang ky tai khoan?");
 
-        assertEquals(Intent.GENERAL, classification.intent());
-        assertEquals("Intent classifier is unavailable", classification.reason());
+        assertEquals(Intent.POLICY, classification.intent());
+        assertEquals("Local fallback: platform guidance", classification.reason());
     }
 
     @Test
@@ -98,6 +98,21 @@ class IntentClassifierTest {
         assertEquals(Intent.GENERAL, classification.intent());
         assertEquals("Intent classifier is unavailable", classification.reason());
         server.verify();
+    }
+
+    @Test
+    void classifyShouldUseLocalSystemFallbackOnlyForLatestOrderLookup() {
+        CircuitBreakerRegistry registry = CircuitBreakerRegistry.ofDefaults();
+        registry.circuitBreaker(IntentClassifier.INTENT_CLASSIFIER_CIRCUIT_BREAKER).transitionToOpenState();
+        IntentClassifier classifier = newClassifier(
+                RestClient.builder().baseUrl("https://api.openai.com/v1").build(),
+                registry
+        );
+
+        IntentClassification classification = classifier.classify("Don hang gan nhat cua toi sao roi?");
+
+        assertEquals(Intent.SYSTEM, classification.intent());
+        assertEquals("Local fallback: latest order lookup", classification.reason());
     }
 
     private IntentClassifier newClassifier(RestClient restClient, CircuitBreakerRegistry registry) {

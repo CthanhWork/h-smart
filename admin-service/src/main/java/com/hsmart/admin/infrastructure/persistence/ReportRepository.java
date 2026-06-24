@@ -8,4 +8,5 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface ReportRepository extends JpaRepository<Report, Long> {
     Page<Report> findAllByStatus(ReportStatus status, Pageable pageable);
+    boolean existsByReporterIdAndProductIdAndStatus(String reporterId, Long productId, ReportStatus status);
 }

@@ -25,6 +25,9 @@ springdoc:
   swagger-ui:
     path: /swagger-ui.html
 
+search:
+  visible-statuses: ${SEARCH_VISIBLE_STATUSES:APPROVED,ACTIVE}
+
 internal:
   security:
     enabled: ${INTERNAL_SECURITY_ENABLED:true}

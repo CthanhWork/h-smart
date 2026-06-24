@@ -12,6 +12,8 @@ import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -47,6 +49,9 @@ public class Order {
     @Column(name = "shipping_fee", nullable = false, precision = 12, scale = 2, columnDefinition = "numeric(12,2) default 0")
     private BigDecimal shippingFee;
 
+    @Column(name = "product_title", length = 255)
+    private String productTitle;
+
     @Column(name = "tracking_code", length = 100)
     private String trackingCode;
 
@@ -57,6 +62,30 @@ public class Order {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private OrderStatus status;
+
+    @Column(name = "completed_at")
+    private LocalDateTime completedAt;
+
+    // --- Return (đổi/trả hàng) ---
+    @Column(name = "return_reason", length = 500)
+    private String returnReason;
+
+    @Column(name = "return_requested_at")
+    private LocalDateTime returnRequestedAt;
+
+    @Column(name = "return_seller_approved", nullable = false, columnDefinition = "boolean default false")
+    private boolean returnSellerApproved;
+
+    @Column(name = "return_admin_approved", nullable = false, columnDefinition = "boolean default false")
+    private boolean returnAdminApproved;
+
+    @Column(name = "return_reject_reason", length = 500)
+    private String returnRejectReason;
+
+    /** JSON array of relative media URLs captured by the seller before shipping (quality evidence). */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "evidence_images", columnDefinition = "jsonb")
+    private String evidenceImages;
 
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;

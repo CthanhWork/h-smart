@@ -1,6 +1,7 @@
 package com.hsmart.backend.infrastructure.persistence;
 
 import com.hsmart.backend.domain.entities.ChatMessage;
+import java.time.Instant;
 import java.util.List;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.mongodb.repository.MongoRepository;
@@ -19,4 +20,7 @@ public interface ChatMessageRepository extends MongoRepository<ChatMessage, Stri
 
     @Query(value = "{ '$or': [ { 'senderId': ?0, 'receiverId': ?1 }, { 'senderId': ?1, 'receiverId': ?0 } ] }", delete = true)
     long deleteAssistantConversation(String userId, String assistantId);
+
+    @Query(value = "{ '$or': [ { 'senderId': ?0 }, { 'receiverId': ?0 } ], 'timestamp': { '$lt': ?1 } }", delete = true)
+    long deleteOldAssistantMessages(String assistantId, Instant cutoff);
 }

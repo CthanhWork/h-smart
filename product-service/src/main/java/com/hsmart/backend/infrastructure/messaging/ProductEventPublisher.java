@@ -23,6 +23,10 @@ public class ProductEventPublisher {
         publishProductSearchEvent(event, ProductRabbitMqConfig.PRODUCT_UPDATED_ROUTING_KEY, "updated");
     }
 
+    public void publishProductDeleted(ProductSearchEvent event) {
+        publishProductSearchEvent(event, ProductRabbitMqConfig.PRODUCT_DELETED_ROUTING_KEY, "deleted");
+    }
+
     public void publishProductSold(ProductSoldEvent event) {
         try {
             rabbitTemplate.convertAndSend(

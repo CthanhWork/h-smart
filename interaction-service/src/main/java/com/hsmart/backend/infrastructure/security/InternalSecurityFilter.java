@@ -45,6 +45,13 @@ public class InternalSecurityFilter extends OncePerRequestFilter {
     }
 
     @Override
+    protected boolean shouldNotFilter(HttpServletRequest request) {
+        // Only enforce the internal-secret check on explicitly internal service-to-service paths.
+        // All regular user-facing paths are forwarded from the gateway with X-User-Id only.
+        return !request.getRequestURI().contains("/internal/");
+    }
+
+    @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain filterChain)
             throws ServletException, IOException {
         if (!enabled || hasValidInternalSecret(request)) {

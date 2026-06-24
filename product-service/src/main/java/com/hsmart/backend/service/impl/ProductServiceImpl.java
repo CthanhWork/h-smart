@@ -36,6 +36,7 @@ import com.hsmart.backend.service.UserAddressClient;
 import com.hsmart.backend.service.VisionService;
 import java.io.IOException;
 import java.io.InputStream;
+import java.math.BigDecimal;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -66,6 +67,10 @@ import org.springframework.http.HttpStatus;
 public class ProductServiceImpl implements ProductService {
 
     private static final String FALLBACK_PRODUCT_TITLE = "Uncategorized Product";
+    private static final EnumSet<ProductStatus> PUBLIC_VISIBLE_STATUSES =
+            EnumSet.of(ProductStatus.APPROVED, ProductStatus.ACTIVE);
+    private static final EnumSet<ProductStatus> SELLER_MANAGEABLE_STATUSES =
+            EnumSet.of(ProductStatus.HIDDEN);
 
     private final VisionService visionService;
     private final ProductRepository productRepository;
@@ -92,10 +97,11 @@ public class ProductServiceImpl implements ProductService {
 
         Category category = resolveCategory(request.getCategoryId());
         List<DetectionDTO> detections = Collections.emptyList();
+        PredictResponseDTO predictResponse = null;
         RuntimeException aiServiceFailure = null;
 
         try {
-            PredictResponseDTO predictResponse = visionService.detectObjects(analysisImage);
+            predictResponse = visionService.detectObjects(analysisImage);
             if (predictResponse.getDetections() != null) {
                 detections = predictResponse.getDetections();
             }
@@ -107,22 +113,24 @@ public class ProductServiceImpl implements ProductService {
         List<String> relativeImageUrls = saveUploadedFiles(normalizedImages);
         String relativeImageUrl = relativeImageUrls.get(0);
         String imageUrlsJson = objectMapper.writeValueAsString(relativeImageUrls);
-        String resolvedTitle = aiServiceFailure != null && !StringUtils.hasText(request.getTitle())
-                ? FALLBACK_PRODUCT_TITLE
-                : productNamingSupport.resolveTitle(request.getTitle(), detections);
+        String resolvedTitle = resolveCreateTitle(request, predictResponse, detections, aiServiceFailure);
         validateClientManagedStatus(request.getStatus());
+        validateNegotiation(request);
         ProductStatus resolvedStatus = ProductStatus.PENDING_REVIEW;
 
         Product product = productMapper.toEntity(
                 request.getDescription(),
                 request.getPrice(),
+                request.isNegotiable(),
+                resolveMinPrice(request),
                 resolvedStatus,
                 sellerId,
                 category,
                 resolvedTitle,
                 relativeImageUrl,
                 imageUrlsJson,
-                aiMetadataJson
+                aiMetadataJson,
+                request.isTitleModifiedByUser()
         );
 
         Product savedProduct = productRepository.save(product);
@@ -135,6 +143,9 @@ public class ProductServiceImpl implements ProductService {
                     getRootCauseMessage(aiServiceFailure),
                     aiServiceFailure
             );
+        } else if (request.isTitleModifiedByUser()) {
+            log.info("Created product {} for seller {} — title modified by user, pending admin review",
+                    savedProduct.getId(), savedProduct.getSellerId());
         } else {
             log.info("Created product {} for seller {}", savedProduct.getId(), savedProduct.getSellerId());
         }
@@ -142,18 +153,32 @@ public class ProductServiceImpl implements ProductService {
     }
 
     @Override
-    public ProductResponseDTO updateProduct(Long id, ProductRequestDTO request) {
+    public ProductResponseDTO updateProduct(Long id, ProductRequestDTO request, List<MultipartFile> newImages) throws IOException {
         String currentUserId = getCurrentUserId();
         Product product = getActiveProduct(id);
         validateOwnership(product, currentUserId);
         ProductStatus previousStatus = product.getStatus();
 
         Category category = resolveCategory(request.getCategoryId());
-        validateClientManagedStatus(request.getStatus());
+        validateUpdateStatus(request.getStatus());
+        validateNegotiation(request);
         product.setTitle(resolveUpdatedTitle(product, request));
         product.setDescription(request.getDescription());
         product.setPrice(request.getPrice());
+        product.setNegotiable(request.isNegotiable());
+        product.setMinPrice(resolveMinPrice(request));
         product.setCategory(category);
+        if (request.getStatus() != null) {
+            product.setStatus(request.getStatus());
+        }
+
+        if (newImages != null && !newImages.isEmpty()) {
+            List<MultipartFile> normalizedImages = normalizeImages(newImages);
+            deleteStoredImageFiles(product);
+            List<String> relativeImageUrls = saveUploadedFiles(normalizedImages);
+            product.setImageUrl(relativeImageUrls.get(0));
+            product.setImageUrls(objectMapper.writeValueAsString(relativeImageUrls));
+        }
 
         Product savedProduct = productRepository.save(product);
         publishProductUpdatedAfterCommit(savedProduct);
@@ -172,6 +197,8 @@ public class ProductServiceImpl implements ProductService {
 
         product.setDeleted(true);
         productRepository.save(product);
+        deleteStoredImageFiles(product);
+        publishProductDeletedAfterCommit(product);
         log.info("Soft deleted product {} for seller {}", product.getId(), product.getSellerId());
     }
 
@@ -183,8 +210,19 @@ public class ProductServiceImpl implements ProductService {
             Long categoryId,
             Pageable pageable
     ) {
+        ProductStatus effectiveStatus = status != null ? status : null;
         Page<ProductResponseDTO> page = productRepository
-                .findAll(buildProductSpecification(normalizeKeyword(keyword), status, categoryId), pageable)
+                .findAll(buildPublicProductSpecification(normalizeKeyword(keyword), effectiveStatus, categoryId), pageable)
+                .map(this::toProductResponse);
+        return PageResponseDTO.from(page);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponseDTO<ProductResponseDTO> getMyProducts(Pageable pageable) {
+        String sellerId = getCurrentUserId();
+        Page<ProductResponseDTO> page = productRepository
+                .findAllBySellerIdAndIsDeletedFalse(sellerId, pageable)
                 .map(this::toProductResponse);
         return PageResponseDTO.from(page);
     }
@@ -194,7 +232,7 @@ public class ProductServiceImpl implements ProductService {
     public PageResponseDTO<ProductResponseDTO> getWishlist(Pageable pageable) {
         String userId = getCurrentUserId();
         Page<ProductResponseDTO> page = productLikeRepository
-                .findAllByUserIdAndProductIsDeletedFalseAndProductStatusNot(userId, ProductStatus.SOLD, pageable)
+                .findAllByUserIdAndProductIsDeletedFalseAndProductStatusIn(userId, PUBLIC_VISIBLE_STATUSES, pageable)
                 .map(productLike -> toProductResponse(productLike.getProduct()));
         return PageResponseDTO.from(page);
     }
@@ -202,6 +240,13 @@ public class ProductServiceImpl implements ProductService {
     @Override
     @Transactional(readOnly = true)
     public ProductResponseDTO getProductById(Long id) {
+        Product product = getPublicProduct(id);
+        return toProductResponse(product);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public ProductResponseDTO getProductByIdForAdmin(Long id) {
         Product product = getActiveProduct(id);
         return toProductResponse(product);
     }
@@ -209,7 +254,7 @@ public class ProductServiceImpl implements ProductService {
     @Override
     public String toggleProductLike(Long id) {
         String userId = getCurrentUserId();
-        Product product = getActiveProduct(id);
+        Product product = getPublicProduct(id);
         return productLikeRepository.findByUserIdAndProductId(userId, product.getId())
                 .map(productLike -> removeProductLike(productLike, product))
                 .orElseGet(() -> saveProductLike(userId, product));
@@ -261,11 +306,15 @@ public class ProductServiceImpl implements ProductService {
     @Override
     @Transactional(readOnly = true)
     public ProductStatsResponseDTO getProductStats() {
-        long totalSellingProducts = productRepository.countByIsDeletedFalseAndStatusIn(
-                EnumSet.of(ProductStatus.APPROVED)
-        );
         return ProductStatsResponseDTO.builder()
-                .totalSellingProducts(totalSellingProducts)
+                .totalSellingProducts(productRepository.countByIsDeletedFalseAndStatusIn(
+                        EnumSet.of(ProductStatus.APPROVED, ProductStatus.ACTIVE)))
+                .totalPendingReview(productRepository.countByIsDeletedFalseAndStatusIn(
+                        EnumSet.of(ProductStatus.PENDING_REVIEW)))
+                .totalHidden(productRepository.countByIsDeletedFalseAndStatusIn(
+                        EnumSet.of(ProductStatus.HIDDEN)))
+                .totalSold(productRepository.countByIsDeletedFalseAndStatusIn(
+                        EnumSet.of(ProductStatus.SOLD)))
                 .build();
     }
 
@@ -298,17 +347,21 @@ public class ProductServiceImpl implements ProductService {
         return keyword.trim();
     }
 
-    private Specification<Product> buildProductSpecification(
+    private Specification<Product> buildPublicProductSpecification(
             String keyword,
-            ProductStatus status,
+            ProductStatus requestedStatus,
             Long categoryId
     ) {
         Specification<Product> specification =
                 (root, query, criteriaBuilder) -> criteriaBuilder.isFalse(root.get("isDeleted"));
 
-        if (status != null) {
+        if (requestedStatus != null) {
             specification = specification.and(
-                    (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("status"), status)
+                    (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("status"), requestedStatus)
+            );
+        } else {
+            specification = specification.and(
+                    (root, query, criteriaBuilder) -> root.get("status").in(PUBLIC_VISIBLE_STATUSES)
             );
         }
 
@@ -339,10 +392,41 @@ public class ProductServiceImpl implements ProductService {
                 .orElseThrow(() -> new ProductNotFoundException(id));
     }
 
+    private Product getPublicProduct(Long id) {
+        Product product = getActiveProduct(id);
+        if (!PUBLIC_VISIBLE_STATUSES.contains(product.getStatus())) {
+            throw new ProductNotFoundException(id);
+        }
+        return product;
+    }
+
     private void validateOwnership(Product product, String currentUserId) {
         if (!product.getSellerId().equals(currentUserId)) {
             throw new OwnershipDeniedException();
         }
+    }
+
+    private String resolveCreateTitle(
+            ProductRequestDTO request,
+            PredictResponseDTO predictResponse,
+            List<DetectionDTO> detections,
+            RuntimeException aiServiceFailure
+    ) {
+        if (StringUtils.hasText(request.getTitle())) {
+            return request.getTitle().trim();
+        }
+        // AI is down (not "recognized nothing") — keep a degraded fallback so sellers can still list.
+        if (aiServiceFailure != null) {
+            return FALLBACK_PRODUCT_TITLE;
+        }
+        // AI ran but recognized nothing: never auto-assign a name, ask the seller to provide one.
+        if (productNamingSupport.isUnrecognized(predictResponse)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Không nhận diện được sản phẩm trong ảnh. Vui lòng nhập tên sản phẩm."
+            );
+        }
+        return productNamingSupport.resolveTitle(request.getTitle(), detections);
     }
 
     private String resolveUpdatedTitle(Product product, ProductRequestDTO request) {
@@ -375,8 +459,56 @@ public class ProductServiceImpl implements ProductService {
         if (status != null) {
             throw new ResponseStatusException(
                     HttpStatus.BAD_REQUEST,
+                    "Product status cannot be set during product creation"
+            );
+        }
+    }
+
+    private void validateUpdateStatus(ProductStatus status) {
+        if (status != null && !SELLER_MANAGEABLE_STATUSES.contains(status)) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
                     "Product status can only be changed by admin-service or order-service workflows"
             );
+        }
+    }
+
+    private void validateNegotiation(ProductRequestDTO request) {
+        if (!request.isNegotiable()) {
+            return;
+        }
+        BigDecimal minPrice = request.getMinPrice();
+        if (minPrice == null) {
+            throw new ResponseStatusException(
+                    HttpStatus.BAD_REQUEST,
+                    "Giá sàn (minPrice) là bắt buộc khi cho phép trả giá"
+            );
+        }
+        if (minPrice.signum() <= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Giá sàn phải lớn hơn 0");
+        }
+        if (request.getPrice() != null && minPrice.compareTo(request.getPrice()) >= 0) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Giá sàn phải nhỏ hơn giá niêm yết");
+        }
+    }
+
+    private BigDecimal resolveMinPrice(ProductRequestDTO request) {
+        return request.isNegotiable() ? request.getMinPrice() : null;
+    }
+
+    private void deleteStoredImageFiles(Product product) {
+        List<String> relativeUrls = parseImageUrls(product.getId(), product.getImageUrls());
+        if (relativeUrls.isEmpty() && StringUtils.hasText(product.getImageUrl())) {
+            relativeUrls = List.of(product.getImageUrl());
+        }
+        Path uploadDir = Paths.get(storageProperties.uploadDir()).toAbsolutePath().normalize();
+        for (String relativeUrl : relativeUrls) {
+            String filename = relativeUrl.substring(relativeUrl.lastIndexOf('/') + 1);
+            try {
+                Files.deleteIfExists(uploadDir.resolve(filename));
+            } catch (IOException e) {
+                log.warn("Failed to delete image file {} for product {}: {}", filename, product.getId(), e.getMessage());
+            }
         }
     }
 
@@ -388,6 +520,11 @@ public class ProductServiceImpl implements ProductService {
     private void publishProductUpdatedAfterCommit(Product product) {
         ProductSearchEvent event = toProductSearchEvent(product);
         publishAfterCommit(() -> productEventPublisher.publishProductUpdated(event));
+    }
+
+    private void publishProductDeletedAfterCommit(Product product) {
+        ProductSearchEvent event = toProductSearchEvent(product);
+        publishAfterCommit(() -> productEventPublisher.publishProductDeleted(event));
     }
 
     private void publishProductSoldAfterCommit(Product product) {
@@ -423,6 +560,7 @@ public class ProductServiceImpl implements ProductService {
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
                 .status(product.getStatus() != null ? product.getStatus().name() : null)
                 .sellerId(product.getSellerId())
+                .imageUrl(product.getImageUrl())
                 .aiMetadata(parseAiMetadata(product.getId(), product.getAiMetadata()))
                 .build();
     }

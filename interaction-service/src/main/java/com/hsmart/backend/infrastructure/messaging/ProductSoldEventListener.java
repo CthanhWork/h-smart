@@ -27,9 +27,10 @@ public class ProductSoldEventListener {
         }
 
         String title = StringUtils.hasText(event.getTitle()) ? event.getTitle().trim() : "Untitled product";
-        String message = String.format("Congratulations! Your product [%s] has been marked as SOLD.", title);
+        String message = String.format("Sản phẩm \"%s\" của bạn đã được đánh dấu là đã bán.", title);
         NotificationRequestDTO request = NotificationRequestDTO.builder()
                 .userId(event.getSellerId().trim())
+                .title("Sản phẩm đã bán")
                 .type(PRODUCT_SOLD_NOTIFICATION_TYPE)
                 .message(message)
                 .productId(event.getProductId())
