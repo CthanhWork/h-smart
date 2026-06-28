@@ -3,6 +3,7 @@ package com.hsmart.payment.infrastructure.order;
 import com.hsmart.payment.application.dto.ApiResponse;
 import com.hsmart.payment.application.dto.CreateOrderInternalRequestDTO;
 import com.hsmart.payment.application.dto.OrderResponseDTO;
+import com.hsmart.payment.application.dto.OrderSummaryDTO;
 import com.hsmart.payment.application.dto.ShippingEstimateResponseDTO;
 import com.hsmart.payment.application.exceptions.OrderServiceUnavailableException;
 import com.hsmart.payment.application.exceptions.PaymentStateException;
@@ -89,6 +90,45 @@ public class OrderServiceClient implements OrderClient {
         } catch (RestClientException exception) {
             log.warn("Order-service order creation failed for product {}", request.getProductId(), exception);
             throw new OrderServiceUnavailableException("Order service is unavailable", exception);
+        }
+    }
+
+    @Override
+    public OrderSummaryDTO getOrderSummary(Long orderId) {
+        try {
+            ApiResponse<OrderSummaryDTO> response = orderServiceRestClient.get()
+                    .uri("/api/v1/orders/internal/{orderId}", orderId)
+                    .header(INTERNAL_SECRET_HEADER, internalSharedSecret)
+                    .retrieve()
+                    .body(new ParameterizedTypeReference<>() {
+                    });
+
+            if (response == null || response.getData() == null || response.getData().id() == null) {
+                throw new OrderServiceUnavailableException("Order-service returned an empty order summary");
+            }
+            return response.getData();
+        } catch (HttpClientErrorException exception) {
+            String message = extractMessage(exception, "Order could not be loaded");
+            log.warn("Order-service rejected order summary lookup for order {}: {}", orderId, message);
+            throw new PaymentStateException(message);
+        } catch (RestClientException exception) {
+            log.warn("Order-service order summary lookup failed for order {}", orderId, exception);
+            throw new OrderServiceUnavailableException("Order service is unavailable", exception);
+        }
+    }
+
+    @Override
+    public void markSellerShippingPaid(Long orderId) {
+        try {
+            orderServiceRestClient.post()
+                    .uri("/api/v1/orders/internal/{orderId}/platform-fee-paid", orderId)
+                    .header(INTERNAL_SECRET_HEADER, internalSharedSecret)
+                    .retrieve()
+                    .toBodilessEntity();
+            log.info("Flagged order {} as platform-fee paid", orderId);
+        } catch (RestClientException exception) {
+            // Best-effort: the payment is already credited; the flag can be reconciled later.
+            log.warn("Could not flag order {} as platform-fee paid: {}", orderId, exception.getMessage());
         }
     }
 

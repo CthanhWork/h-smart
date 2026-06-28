@@ -6,6 +6,7 @@ import com.hsmart.order.application.dto.GhtkWebhookRequestDTO;
 import com.hsmart.order.application.dto.OfferResponseDTO;
 import com.hsmart.order.application.dto.OrderResponseDTO;
 import com.hsmart.order.application.dto.OrderStatsResponseDTO;
+import com.hsmart.order.application.dto.OrderSummaryDTO;
 import com.hsmart.order.application.dto.PageResponseDTO;
 import com.hsmart.order.application.dto.ShippingEstimateResponseDTO;
 import com.hsmart.order.domain.entities.DeliveryMethod;
@@ -20,6 +21,12 @@ public interface OrderService {
     OrderResponseDTO completeOrder(Long orderId, String buyerId);
     OrderResponseDTO confirmOrder(Long orderId, String sellerId, List<MultipartFile> evidenceImages);
     OrderResponseDTO cancelOrder(Long orderId, String currentUserId);
+
+    /** Internal: order summary used by payment-service for the seller platform-fee flow. */
+    OrderSummaryDTO getOrderSummary(Long orderId);
+
+    /** Internal: flag the order as having its platform fee paid (called after a successful payment). */
+    void markSellerShippingPaid(Long orderId);
 
     // --- Đổi/trả hàng (return) ---
     OrderResponseDTO requestReturn(Long orderId, String buyerId, String reason);

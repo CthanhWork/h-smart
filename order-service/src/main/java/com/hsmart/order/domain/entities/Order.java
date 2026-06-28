@@ -49,6 +49,14 @@ public class Order {
     @Column(name = "shipping_fee", nullable = false, precision = 12, scale = 2, columnDefinition = "numeric(12,2) default 0")
     private BigDecimal shippingFee;
 
+    /** Platform fee the seller pays at confirmation = min(shippingFee, productAmount * maxRate). */
+    @Column(name = "platform_fee", nullable = false, precision = 12, scale = 2, columnDefinition = "numeric(12,2) default 0")
+    private BigDecimal platformFee;
+
+    /** Set once the seller has paid the platform fee (gates order confirmation). */
+    @Column(name = "seller_shipping_fee_paid", nullable = false, columnDefinition = "boolean default false")
+    private boolean sellerShippingFeePaid;
+
     @Column(name = "product_title", length = 255)
     private String productTitle;
 
@@ -103,6 +111,9 @@ public class Order {
         }
         if (shippingFee == null) {
             shippingFee = BigDecimal.ZERO;
+        }
+        if (platformFee == null) {
+            platformFee = BigDecimal.ZERO;
         }
         if (productAmount == null && amount != null) {
             productAmount = amount.subtract(shippingFee);

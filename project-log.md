@@ -2923,3 +2923,71 @@ Verification: `order-service`: 42 tests passed (41 existing updated + 1 new)
 - Verification:
   - `interaction-service`: `mvn -q test` passed
   - `admin-service`: `mvn -q test` passed
+
+[2026-06-27] Lọc sản phẩm theo tỉnh/thành (province) — denormalize vị trí người bán vào product + search index
+
+- Mục tiêu hiệu năng: filter theo tỉnh không phát sinh lời gọi mạng lúc query. Vị trí (tỉnh/thành) được snapshot vào dữ liệu được tìm kiếm thay vì enrich từ user-service mỗi lần đọc.
+- `user-service` (DB: hsmart_user_db):
+  - `UserAddressResponseDTO` + `UserServiceImpl.getUserAddress` nay trả thêm `provinceCode` (lấy từ `User.provinceCode`).
+  - Endpoint nội bộ không đổi: `GET /api/v1/users/internal/{userId}/address`.
+  - Dropdown tỉnh cho FE dùng API có sẵn: `GET /api/v1/locations/provinces`.
+- `product-service` (DB: hsmart_product_db):
+  - `Product` entity thêm cột `province_code`, `province`, `district` (Hibernate ddl-auto=update tự tạo).
+  - `ProductServiceImpl.applySellerLocationSnapshot` snapshot vị trí người bán vào product lúc create/update (chỉ ghi đè khi user-service trả dữ liệu).
+  - Bỏ N+1: `enrichSellerLocation` đọc từ snapshot trên product; chỉ fallback gọi user-service cho tin cũ (chưa có snapshot).
+  - `ProductSearchEvent` mang thêm `provinceCode`, `province` để index.
+  - Filter danh sách: `GET /api/v1/products?provinceCode=` (thêm điều kiện Specification theo `province_code`).
+  - `UserAddressResponseDTO` record thêm `provinceCode`.
+- `search-service` (Elasticsearch products_index):
+  - `ProductDocument` thêm `provinceCode` (Keyword, filter) và `province` (Keyword, hiển thị).
+  - `ProductSearchServiceImpl` index 2 trường mới và thêm `term` filter theo `provinceCode`.
+  - Filter tìm kiếm: `GET /api/v1/search/products?provinceCode=`.
+  - `ProductSearchResponseDTO` trả thêm `provinceCode`, `province`.
+- Inter-service flow: product-service -> RabbitMQ ProductSearchEvent (kèm provinceCode/province) -> search-service index. Vị trí lấy 1 lần từ user-service lúc đăng/sửa tin.
+- Lưu ý staleness: người bán đổi địa chỉ thì tin cũ giữ tỉnh cũ trong index cho tới khi tin được lưu lại; reindex thủ công khi cần (chưa làm event auto-reindex theo địa chỉ).
+- Verification:
+  - `user-service`: `mvn -o test` passed (36 tests)
+  - `product-service`: `mvn -o test` passed (33 tests)
+  - `search-service`: `mvn -o test` passed (7 tests)
+
+[2026-06-28] Phí nền tảng do người bán trả khi xác nhận đơn — cộng vào tài khoản hệ thống (ví + sổ giao dịch)
+
+- Mục tiêu nghiệp vụ: người bán phải thanh toán một khoản phí nền tảng khi xác nhận đơn; tiền được cộng vào "tài khoản hệ thống". Phí = phí giao hàng nhưng KHÔNG vượt quá 10% giá trị hàng (`platformFee = min(shippingFee, productAmount * maxRate)`). Cọc của người mua giữ nguyên (2 dòng tiền song song).
+- `order-service` (DB: hsmart_order_db):
+  - `Order` thêm cột `platform_fee` (numeric 12,2) và `seller_shipping_fee_paid` (boolean) — Hibernate ddl-auto=update tự tạo.
+  - `OrderServiceImpl.createOrder` tính & lưu `platformFee` qua `computePlatformFee(productAmount, shippingFee)`; trần đọc từ env `PLATFORM_FEE_MAX_RATE` (mặc định 0.10, key `platform.fee.max-rate`).
+  - `confirmOrder` thêm guard: chặn xác nhận nếu `sellerShippingFeePaid == false` ("Bạn cần thanh toán phí nền tảng trước khi xác nhận đơn hàng").
+  - Endpoint nội bộ mới: `GET /api/v1/orders/internal/{orderId}` (trả `OrderSummaryDTO`) và `POST /api/v1/orders/internal/{orderId}/platform-fee-paid` (đặt cờ đã trả). Bảo vệ bằng `X-Internal-Secret` (InternalSecurityFilter áp cho mọi request).
+  - `OrderResponseDTO` trả thêm `platformFee`, `sellerShippingFeePaid`.
+- `payment-service` (DB: hsmart_payment_db):
+  - Entity mới: `SystemAccount` (ví hệ thống singleton, code `PLATFORM`), `SystemLedgerEntry` (sổ giao dịch append-only), `PlatformFeePayment` (thanh toán phí của seller qua VNPay). Enum mới: `LedgerEntryType.PLATFORM_FEE_IN`, `LedgerDirection`.
+  - `SystemAccountServiceImpl.creditPlatformFee` cộng số dư + ghi 1 dòng ledger, idempotent theo `orderId` (kiểm tra ledger đã có).
+  - `PaymentServiceImpl`: thêm `createPlatformFee`/`getPlatformFee`; định tuyến callback VNPay theo `vnp_TxnRef` (tra DepositPayment trước, rồi PlatformFeePayment) trong cả `handleIpn` và `handleReturn`. Khi thanh toán phí thành công: set PAID → `creditPlatformFee` → gọi order-service đặt cờ `platform-fee-paid`. Hết hạn PENDING cũng quét cho platform-fee.
+  - `VnpayService.buildPaymentUrl` refactor thêm overload `(txnRef, amount, orderInfo, clientIp)` dùng chung cho deposit và platform-fee.
+  - `OrderClient`: thêm `getOrderSummary` + `markSellerShippingPaid` (gọi order-service nội bộ).
+  - Endpoint mới: `POST /api/v1/payments/platform-fee` (header `X-User-Id` = sellerId, body `{orderId}`) → trả VNPay payment URL; `GET /api/v1/payments/platform-fee/{id}`.
+- Inter-service flow: FE(seller) -> gateway -> payment-service `/platform-fee` (lấy `OrderSummary` từ order-service, tạo PlatformFeePayment, dựng URL VNPay) -> seller trả VNPay -> IPN/Return về payment-service -> set PAID + cộng ví hệ thống + ghi ledger -> báo order-service đặt cờ -> seller mới `confirm` được đơn.
+- Edge case (v1): hủy đơn sau khi seller đã trả phí nền tảng KHÔNG tự hoàn (chỉ log; có thể bổ sung DEBIT ledger + hoàn VNPay sau).
+- Chưa làm: phần FE (`../H-smart UI`) — nút "Thanh toán phí giao hàng/nền tảng" trước khi xác nhận đơn.
+- Verification:
+  - `payment-service`: `mvn -f payment-service/pom.xml test` passed (17 tests)
+  - `order-service`: `mvn -f order-service/pom.xml test` passed (52 tests)
+
+[2026-06-28] Admin xem tài khoản hệ thống & doanh thu phí nền tảng (read-only)
+
+- Mục tiêu: admin theo dõi dòng tiền phí nền tảng — số dư ví hệ thống, tổng phí đã thu, và sổ giao dịch chi tiết. Không có thao tác rút/điều chỉnh (giữ read-only).
+- `payment-service` (DB: hsmart_payment_db):
+  - `SystemLedgerRepository.sumAmountByDirection(direction)` (JPQL coalesce sum).
+  - `SystemAccountService.getSummary()` (số dư + tổng CREDIT/DEBIT + số giao dịch) và `getLedger(page, size)` (sổ giao dịch, mới nhất trước) — đều read-only.
+  - DTO mới: `SystemAccountSummaryDTO`, `SystemLedgerEntryDTO`, `PageResponseDTO` (chuẩn phân trang dùng chung).
+  - Endpoint nội bộ mới (bảo vệ `X-Internal-Secret`): `GET /api/v1/payments/internal/system-account`, `GET /api/v1/payments/internal/system-account/ledger?page=&size=`.
+- `admin-service` (DB: hsmart_admin_db):
+  - Thêm client tới payment-service: `payment-service.base-url` trong application.yml + bean `paymentServiceRestClient`/`paymentServiceProperties` trong `DownstreamClientConfig`.
+  - `PaymentAdminClient` + `PaymentServiceAdminClient` (gọi 2 endpoint nội bộ trên, convert sang DTO admin).
+  - `AdminAnalyticsService`: thêm `getSystemAccount()` + `getSystemLedger(page,size)`; `getOverviewStats()` gộp thêm `platformFeeRevenue` (best-effort: payment-service lỗi thì về 0, không làm hỏng dashboard).
+  - `OverviewStatsResponseDTO` thêm `platformFeeRevenue`.
+  - Controller mới `AdminSystemAccountController` (@RequestMapping `/api/v1/admin/system-account`): `GET /` (summary) và `GET /ledger?page=&size=`. Bảo vệ bởi `InternalSecurityFilter` + `AdminRoleFilter` (yêu cầu `X-User-Role=ADMIN`).
+- Inter-service flow: FE(admin) -> gateway (gắn X-Internal-Secret + X-User-Role) -> admin-service -> payment-service `/internal/system-account[/ledger]` -> trả số dư/sổ giao dịch.
+- Verification:
+  - `payment-service`: `mvn -f payment-service/pom.xml test` passed (20 tests)
+  - `admin-service`: `mvn -f admin-service/pom.xml test` passed (20 tests)

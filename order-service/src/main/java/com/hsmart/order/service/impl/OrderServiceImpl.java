@@ -6,6 +6,7 @@ import com.hsmart.order.application.dto.OrderCompletedEvent;
 import com.hsmart.order.application.dto.OfferResponseDTO;
 import com.hsmart.order.application.dto.OrderResponseDTO;
 import com.hsmart.order.application.dto.OrderStatsResponseDTO;
+import com.hsmart.order.application.dto.OrderSummaryDTO;
 import com.hsmart.order.application.dto.PageResponseDTO;
 import com.hsmart.order.application.dto.ProductResponseDTO;
 import com.hsmart.order.application.dto.GhtkShipmentRequestDTO;
@@ -98,6 +99,9 @@ public class OrderServiceImpl implements OrderService {
     @Value("${offers.resubmit-cooldown-hours:1}")
     private int offerResubmitCooldownHours;
 
+    @Value("${platform.fee.max-rate:0.10}")
+    private double platformFeeMaxRate;
+
     @Override
     public OrderResponseDTO createOrder(CreateOrderRequestDTO request, String buyerId) {
         ProductResponseDTO product = productClient.getProduct(request.getProductId(), buyerId);
@@ -108,6 +112,7 @@ public class OrderServiceImpl implements OrderService {
         BigDecimal shippingFee = resolveShippingFee(product.sellerId(), buyerId, shippingProviderClient);
         ProductOffer checkoutOffer = resolveCheckoutOffer(request.getOfferId(), product, buyerId);
         BigDecimal productAmount = checkoutOffer != null ? checkoutOffer.getOfferPrice() : product.price();
+        BigDecimal platformFee = computePlatformFee(productAmount, shippingFee);
 
         Order order = Order.builder()
                 .buyerId(buyerId)
@@ -117,6 +122,7 @@ public class OrderServiceImpl implements OrderService {
                 .amount(productAmount.add(shippingFee))
                 .productAmount(productAmount)
                 .shippingFee(shippingFee)
+                .platformFee(platformFee)
                 .deliveryMethod(deliveryMethod)
                 .status(OrderStatus.PENDING)
                 .build();
@@ -233,6 +239,20 @@ public class OrderServiceImpl implements OrderService {
         }
     }
 
+    /**
+     * Platform fee the seller pays = the shipping fee, capped at {@code platformFeeMaxRate} of the
+     * product amount (the order value, excluding shipping). Rounded to 2 decimals, never negative.
+     */
+    private BigDecimal computePlatformFee(BigDecimal productAmount, BigDecimal shippingFee) {
+        if (shippingFee == null || shippingFee.signum() <= 0 || productAmount == null) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal cap = productAmount
+                .multiply(BigDecimal.valueOf(platformFeeMaxRate))
+                .setScale(2, RoundingMode.HALF_UP);
+        return shippingFee.min(cap).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+    }
+
     @Override
     public OrderResponseDTO confirmOrder(Long orderId, String sellerId, List<MultipartFile> evidenceImages) {
         Order order = findOrder(orderId);
@@ -242,6 +262,9 @@ public class OrderServiceImpl implements OrderService {
         }
         if (order.getStatus() != OrderStatus.PENDING) {
             throw new OrderStateException("Only pending orders can be confirmed");
+        }
+        if (!order.isSellerShippingFeePaid()) {
+            throw new OrderStateException("Bạn cần thanh toán phí nền tảng trước khi xác nhận đơn hàng");
         }
 
         List<MultipartFile> normalizedImages = normalizeImages(evidenceImages);
@@ -337,6 +360,34 @@ public class OrderServiceImpl implements OrderService {
         publishAfterCommit(() -> paymentClient.refundDeposit(savedOrder.getId()));
         log.info("Cancelled order {} by user {}", savedOrder.getId(), currentUserId);
         return toResponse(savedOrder);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public OrderSummaryDTO getOrderSummary(Long orderId) {
+        Order order = findOrder(orderId);
+        return OrderSummaryDTO.builder()
+                .id(order.getId())
+                .sellerId(order.getSellerId())
+                .productId(order.getProductId())
+                .productAmount(resolveProductAmount(order, BigDecimal.ZERO))
+                .shippingFee(order.getShippingFee())
+                .platformFee(order.getPlatformFee())
+                .status(order.getStatus().name())
+                .sellerShippingFeePaid(order.isSellerShippingFeePaid())
+                .build();
+    }
+
+    @Override
+    public void markSellerShippingPaid(Long orderId) {
+        Order order = findOrder(orderId);
+        if (order.isSellerShippingFeePaid()) {
+            log.info("Order {} already flagged as platform-fee paid; skipping", orderId);
+            return;
+        }
+        order.setSellerShippingFeePaid(true);
+        orderRepository.save(order);
+        log.info("Flagged order {} as platform-fee paid", orderId);
     }
 
     private OrderResponseDTO markOrderCompleted(Order order) {
@@ -887,6 +938,8 @@ public class OrderServiceImpl implements OrderService {
                 .amount(order.getAmount())
                 .productAmount(resolveProductAmount(order, BigDecimal.ZERO))
                 .shippingFee(order.getShippingFee())
+                .platformFee(order.getPlatformFee())
+                .sellerShippingFeePaid(order.isSellerShippingFeePaid())
                 .trackingCode(order.getTrackingCode())
                 .deliveryMethod(order.getDeliveryMethod())
                 .status(order.getStatus())

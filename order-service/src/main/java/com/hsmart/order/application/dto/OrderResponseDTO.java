@@ -23,6 +23,8 @@ public class OrderResponseDTO {
     private BigDecimal amount;
     private BigDecimal productAmount;
     private BigDecimal shippingFee;
+    private BigDecimal platformFee;
+    private boolean sellerShippingFeePaid;
     private String trackingCode;
     private DeliveryMethod deliveryMethod;
     private OrderStatus status;

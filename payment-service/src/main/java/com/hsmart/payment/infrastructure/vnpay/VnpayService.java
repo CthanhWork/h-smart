@@ -41,8 +41,21 @@ public class VnpayService {
     }
 
     public String buildPaymentUrl(DepositPayment payment, String clientIp) {
+        return buildPaymentUrl(
+                payment.getTxnRef(),
+                payment.getAmount(),
+                "Dat coc van chuyen don hang san pham " + payment.getProductId(),
+                clientIp
+        );
+    }
+
+    /**
+     * Builds a VNPay payment URL for an arbitrary transaction. Used by both the buyer deposit
+     * flow and the seller platform-fee flow; the {@code vnp_TxnRef} disambiguates them on callback.
+     */
+    public String buildPaymentUrl(String txnRef, BigDecimal amount, String orderInfo, String clientIp) {
         ZonedDateTime now = ZonedDateTime.now(VN_ZONE);
-        long amountInMinorUnit = payment.getAmount().multiply(BigDecimal.valueOf(100)).longValueExact();
+        long amountInMinorUnit = amount.multiply(BigDecimal.valueOf(100)).longValueExact();
 
         Map<String, String> params = new TreeMap<>();
         params.put("vnp_Version", properties.version());
@@ -50,8 +63,8 @@ public class VnpayService {
         params.put("vnp_TmnCode", properties.tmnCode());
         params.put("vnp_Amount", Long.toString(amountInMinorUnit));
         params.put("vnp_CurrCode", properties.currencyCode());
-        params.put("vnp_TxnRef", payment.getTxnRef());
-        params.put("vnp_OrderInfo", "Dat coc van chuyen don hang san pham " + payment.getProductId());
+        params.put("vnp_TxnRef", txnRef);
+        params.put("vnp_OrderInfo", orderInfo);
         params.put("vnp_OrderType", properties.orderType());
         params.put("vnp_Locale", StringUtils.hasText(properties.locale()) ? properties.locale() : "vn");
         params.put("vnp_ReturnUrl", properties.returnUrl());

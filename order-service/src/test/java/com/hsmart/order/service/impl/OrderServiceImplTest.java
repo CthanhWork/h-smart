@@ -208,6 +208,75 @@ class OrderServiceImplTest {
     }
 
     @Test
+    void createOrderShouldCapPlatformFeeAtMaxRateOfProductAmount() {
+        ReflectionTestUtils.setField(orderService, "platformFeeMaxRate", 0.10);
+        UserAddressResponseDTO sellerAddress = address("seller-one", "District 1");
+        UserAddressResponseDTO buyerAddress = address("buyer-one", "Thu Duc City");
+        given(productClient.getProduct(10L, "buyer-one")).willReturn(product());
+        given(userClient.getUserAddress("seller-one")).willReturn(sellerAddress);
+        given(userClient.getUserAddress("buyer-one")).willReturn(buyerAddress);
+        // Shipping (30000) exceeds 10% of the 100000 product price, so the fee is capped at 10000.
+        given(ghtkClient.calculateShippingFee(sellerAddress, buyerAddress)).willReturn(BigDecimal.valueOf(30000));
+
+        OrderResponseDTO response = orderService.createOrder(ghtkOrderRequest(10L), "buyer-one");
+
+        assertThat(response.getPlatformFee()).isEqualByComparingTo("10000");
+        assertThat(response.isSellerShippingFeePaid()).isFalse();
+    }
+
+    @Test
+    void createOrderShouldUseShippingFeeAsPlatformFeeWhenBelowCap() {
+        ReflectionTestUtils.setField(orderService, "platformFeeMaxRate", 0.10);
+        UserAddressResponseDTO sellerAddress = address("seller-one", "District 1");
+        UserAddressResponseDTO buyerAddress = address("buyer-one", "Thu Duc City");
+        given(productClient.getProduct(10L, "buyer-one")).willReturn(product());
+        given(userClient.getUserAddress("seller-one")).willReturn(sellerAddress);
+        given(userClient.getUserAddress("buyer-one")).willReturn(buyerAddress);
+        // Shipping (5000) is below 10% of the 100000 product price (10000), so the fee equals shipping.
+        given(ghtkClient.calculateShippingFee(sellerAddress, buyerAddress)).willReturn(BigDecimal.valueOf(5000));
+
+        OrderResponseDTO response = orderService.createOrder(ghtkOrderRequest(10L), "buyer-one");
+
+        assertThat(response.getPlatformFee()).isEqualByComparingTo("5000");
+    }
+
+    @Test
+    void confirmOrderShouldRejectWhenPlatformFeeNotPaid() {
+        Order order = pendingOrder();
+        order.setSellerShippingFeePaid(false);
+        given(orderRepository.findById(5L)).willReturn(java.util.Optional.of(order));
+
+        assertThatThrownBy(() -> orderService.confirmOrder(5L, "seller-one", evidenceImages()))
+                .isInstanceOf(com.hsmart.order.application.exceptions.OrderStateException.class)
+                .hasMessageContaining("phí nền tảng");
+        verify(ghtkClient, never()).createShipment(any(GhtkShipmentRequestDTO.class));
+    }
+
+    @Test
+    void markSellerShippingPaidShouldFlagOrder() {
+        Order order = pendingOrder();
+        order.setSellerShippingFeePaid(false);
+        given(orderRepository.findById(5L)).willReturn(java.util.Optional.of(order));
+
+        orderService.markSellerShippingPaid(5L);
+
+        assertThat(order.isSellerShippingFeePaid()).isTrue();
+        verify(orderRepository).save(order);
+    }
+
+    @Test
+    void getOrderSummaryShouldExposePlatformFeeAndSeller() {
+        given(orderRepository.findById(5L)).willReturn(java.util.Optional.of(pendingOrder()));
+
+        var summary = orderService.getOrderSummary(5L);
+
+        assertThat(summary.getSellerId()).isEqualTo("seller-one");
+        assertThat(summary.getPlatformFee()).isEqualByComparingTo("10000");
+        assertThat(summary.getStatus()).isEqualTo("PENDING");
+        assertThat(summary.isSellerShippingFeePaid()).isTrue();
+    }
+
+    @Test
     void createOrderShouldRejectOrderWhenGhtkFeeCalculationFails() {
         UserAddressResponseDTO sellerAddress = address("seller-one", "District 1");
         UserAddressResponseDTO buyerAddress = address("buyer-one", "Thu Duc City");
@@ -731,6 +800,8 @@ class OrderServiceImplTest {
                 .productId(10L)
                 .amount(BigDecimal.valueOf(130000))
                 .shippingFee(BigDecimal.valueOf(30000))
+                .platformFee(BigDecimal.valueOf(10000))
+                .sellerShippingFeePaid(true)
                 .deliveryMethod(DeliveryMethod.GHTK)
                 .status(OrderStatus.PENDING)
                 .build();

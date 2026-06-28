@@ -6,6 +6,7 @@ import com.hsmart.order.application.dto.CreateOrderRequestDTO;
 import com.hsmart.order.application.dto.OfferResponseDTO;
 import com.hsmart.order.application.dto.OrderResponseDTO;
 import com.hsmart.order.application.dto.OrderStatsResponseDTO;
+import com.hsmart.order.application.dto.OrderSummaryDTO;
 import com.hsmart.order.application.dto.GhtkWebhookRequestDTO;
 import com.hsmart.order.application.dto.PageResponseDTO;
 import com.hsmart.order.application.dto.ReturnActionRequestDTO;
@@ -236,6 +237,20 @@ public class OrderController {
     ) {
         OrderResponseDTO response = orderService.getOrder(id, requireUserId(currentUserId));
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Order fetched successfully", response));
+    }
+
+    /** Internal: order summary for payment-service to drive the seller platform-fee payment. */
+    @GetMapping("/internal/{orderId}")
+    public ResponseEntity<ApiResponse<OrderSummaryDTO>> getOrderSummary(@PathVariable Long orderId) {
+        OrderSummaryDTO response = orderService.getOrderSummary(orderId);
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Order summary fetched successfully", response));
+    }
+
+    /** Internal: flag the order's platform fee as paid (called by payment-service after success). */
+    @PostMapping("/internal/{orderId}/platform-fee-paid")
+    public ResponseEntity<ApiResponse<Void>> markPlatformFeePaid(@PathVariable Long orderId) {
+        orderService.markSellerShippingPaid(orderId);
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Order flagged as platform-fee paid", null));
     }
 
     @GetMapping("/internal/stats")

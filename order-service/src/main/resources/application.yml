@@ -83,6 +83,11 @@ offers:
   expiration-scan-ms: ${OFFERS_EXPIRATION_SCAN_MS:300000}
   resubmit-cooldown-hours: ${OFFERS_RESUBMIT_COOLDOWN_HOURS:1}
 
+platform:
+  fee:
+    # Platform fee charged to the seller = min(shippingFee, productAmount * max-rate).
+    max-rate: ${PLATFORM_FEE_MAX_RATE:0.10}
+
 internal:
   security:
     enabled: ${INTERNAL_SECURITY_ENABLED:true}

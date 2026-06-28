@@ -1,7 +1,9 @@
 package com.hsmart.payment.service;
 
 import com.hsmart.payment.application.dto.CreateDepositRequestDTO;
+import com.hsmart.payment.application.dto.CreatePlatformFeeRequestDTO;
 import com.hsmart.payment.application.dto.DepositResponseDTO;
+import com.hsmart.payment.application.dto.PlatformFeeResponseDTO;
 import java.util.Map;
 
 public interface PaymentService {
@@ -10,6 +12,11 @@ public interface PaymentService {
     DepositResponseDTO createDeposit(CreateDepositRequestDTO request, String buyerId, String clientIp);
 
     DepositResponseDTO getDeposit(Long id, String buyerId);
+
+    /** Creates a PENDING platform-fee payment for the seller and returns a VNPay payment URL. */
+    PlatformFeeResponseDTO createPlatformFee(CreatePlatformFeeRequestDTO request, String sellerId, String clientIp);
+
+    PlatformFeeResponseDTO getPlatformFee(Long id, String sellerId);
 
     /** Handles the browser Return URL callback; returns the FE redirect URL. */
     String handleReturn(Map<String, String> params);
