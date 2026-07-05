@@ -10,6 +10,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import org.hibernate.annotations.JdbcTypeCode;
@@ -60,6 +61,10 @@ public class Order {
     @Column(name = "product_title", length = 255)
     private String productTitle;
 
+    /** Snapshot of the product image at order time so cancelled/relisted orders still render. */
+    @Column(name = "product_image_url", length = 512)
+    private String productImageUrl;
+
     @Column(name = "tracking_code", length = 100)
     private String trackingCode;
 
@@ -95,11 +100,20 @@ public class Order {
     @Column(name = "evidence_images", columnDefinition = "jsonb")
     private String evidenceImages;
 
+    /** JSON array of relative media URLs uploaded by the buyer when requesting a return. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "return_evidence_images", columnDefinition = "jsonb")
+    private String returnEvidenceImages;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private Long version;
 
     @PrePersist
     public void prePersist() {

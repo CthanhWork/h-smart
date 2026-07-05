@@ -116,6 +116,7 @@ public class UserServiceImpl implements UserService {
                 .userId(user.getUsername())
                 .fullName(user.getFullName())
                 .phoneNumber(user.getPhoneNumber())
+                .provinceCode(user.getProvinceCode())
                 .province(user.getProvince())
                 .district(user.getDistrict())
                 .ward(user.getWard())

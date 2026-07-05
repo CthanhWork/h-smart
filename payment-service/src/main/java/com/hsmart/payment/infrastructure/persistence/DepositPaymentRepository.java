@@ -20,4 +20,6 @@ public interface DepositPaymentRepository extends JpaRepository<DepositPayment, 
     boolean existsByProductIdAndBuyerIdAndStatus(Long productId, String buyerId, PaymentStatus status);
 
     List<DepositPayment> findByStatusAndCreatedAtBefore(PaymentStatus status, LocalDateTime createdBefore);
+
+    List<DepositPayment> findByStatusAndOrderIdIsNullAndPaidAtBefore(PaymentStatus status, LocalDateTime paidBefore);
 }

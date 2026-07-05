@@ -34,6 +34,8 @@ vnpay:
 payments:
   pending-timeout-minutes: ${PAYMENT_PENDING_TIMEOUT_MINUTES:30}
   pending-timeout-scan-ms: ${PAYMENT_PENDING_TIMEOUT_SCAN_MS:60000}
+  orphan-refund-scan-ms: ${PAYMENT_ORPHAN_REFUND_SCAN_MS:300000}
+  orphan-grace-period-minutes: ${PAYMENT_ORPHAN_GRACE_PERIOD_MINUTES:10}
 
 internal:
   security:

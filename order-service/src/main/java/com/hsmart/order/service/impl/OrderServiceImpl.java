@@ -31,6 +31,7 @@ import com.hsmart.order.infrastructure.config.StorageProperties;
 import com.hsmart.order.infrastructure.messaging.OrderEventPublisher;
 import com.hsmart.order.infrastructure.persistence.OrderRepository;
 import com.hsmart.order.infrastructure.persistence.ProductOfferRepository;
+import com.hsmart.order.infrastructure.validation.FileValidator;
 import com.hsmart.order.service.NotificationClient;
 import com.hsmart.order.service.OrderService;
 import com.hsmart.order.service.PaymentClient;
@@ -59,6 +60,7 @@ import org.springframework.data.domain.Pageable;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -89,12 +91,16 @@ public class OrderServiceImpl implements OrderService {
     private final StorageProperties storageProperties;
     private final ApplicationProperties applicationProperties;
     private final ObjectMapper objectMapper;
+    private final FileValidator fileValidator;
 
     @Value("${orders.pending-timeout-minutes:30}")
     private long pendingTimeoutMinutes;
 
     @Value("${orders.return-window-days:3}")
     private long returnWindowDays;
+
+    @Value("${orders.return-approval-timeout-hours:48}")
+    private long returnApprovalTimeoutHours;
 
     @Value("${offers.resubmit-cooldown-hours:1}")
     private int offerResubmitCooldownHours;
@@ -119,6 +125,7 @@ public class OrderServiceImpl implements OrderService {
                 .sellerId(product.sellerId())
                 .productId(product.id())
                 .productTitle(product.title())
+                .productImageUrl(product.imageUrl())
                 .amount(productAmount.add(shippingFee))
                 .productAmount(productAmount)
                 .shippingFee(shippingFee)
@@ -268,6 +275,7 @@ public class OrderServiceImpl implements OrderService {
         }
 
         List<MultipartFile> normalizedImages = normalizeImages(evidenceImages);
+        fileValidator.validateImages(normalizedImages); // Add validation
         ProductResponseDTO product = productClient.getProduct(order.getProductId(), sellerId);
         UserAddressResponseDTO sellerAddress = userClient.getUserAddress(order.getSellerId());
         UserAddressResponseDTO buyerAddress = userClient.getUserAddress(order.getBuyerId());
@@ -506,12 +514,16 @@ public class OrderServiceImpl implements OrderService {
             throw new OrderStateException("Only pending offers can be accepted");
         }
 
-        offer.setStatus(OfferStatus.ACCEPTED);
-        ProductOffer savedOffer = productOfferRepository.save(offer);
-        OfferResponseDTO response = toOfferResponse(savedOffer);
-        publishAfterCommit(() -> notificationClient.sendOfferAcceptedNotification(response));
-        log.info("Accepted offer {} for product {}", savedOffer.getId(), savedOffer.getProductId());
-        return response;
+        try {
+            offer.setStatus(OfferStatus.ACCEPTED);
+            ProductOffer savedOffer = productOfferRepository.save(offer);
+            OfferResponseDTO response = toOfferResponse(savedOffer);
+            publishAfterCommit(() -> notificationClient.sendOfferAcceptedNotification(response));
+            log.info("Accepted offer {} for product {}", savedOffer.getId(), savedOffer.getProductId());
+            return response;
+        } catch (OptimisticLockingFailureException ex) {
+            throw new OrderStateException("This offer was just modified by another operation. Please refresh and try again.");
+        }
     }
 
     @Override
@@ -524,12 +536,16 @@ public class OrderServiceImpl implements OrderService {
             throw new OrderStateException("Only pending offers can be rejected");
         }
 
-        offer.setStatus(OfferStatus.REJECTED);
-        ProductOffer savedOffer = productOfferRepository.save(offer);
-        OfferResponseDTO response = toOfferResponse(savedOffer);
-        publishAfterCommit(() -> notificationClient.sendOfferRejectedNotification(response));
-        log.info("Rejected offer {} for product {}", savedOffer.getId(), savedOffer.getProductId());
-        return response;
+        try {
+            offer.setStatus(OfferStatus.REJECTED);
+            ProductOffer savedOffer = productOfferRepository.save(offer);
+            OfferResponseDTO response = toOfferResponse(savedOffer);
+            publishAfterCommit(() -> notificationClient.sendOfferRejectedNotification(response));
+            log.info("Rejected offer {} for product {}", savedOffer.getId(), savedOffer.getProductId());
+            return response;
+        } catch (OptimisticLockingFailureException ex) {
+            throw new OrderStateException("This offer was just modified by another operation. Please refresh and try again.");
+        }
     }
 
     @Override
@@ -640,6 +656,39 @@ public class OrderServiceImpl implements OrderService {
         log.info("Expired {} pending product offers", saved.size());
     }
 
+    /**
+     * Auto-approves return requests where the seller has not responded within the timeout period.
+     * After seller auto-approval, admin must still approve for the return to be finalized.
+     */
+    @Scheduled(fixedDelayString = "${orders.return-timeout-scan-ms:3600000}")
+    public void autoApproveTimedOutReturnRequests() {
+        if (returnApprovalTimeoutHours <= 0) {
+            return;
+        }
+        LocalDateTime timeoutBefore = LocalDateTime.now().minusHours(returnApprovalTimeoutHours);
+        List<Order> timedOutReturns = orderRepository.findReturnRequestsPendingSellerApproval(timeoutBefore);
+        if (timedOutReturns.isEmpty()) {
+            return;
+        }
+
+        for (Order order : timedOutReturns) {
+            order.setReturnSellerApproved(true);
+            Order saved = orderRepository.save(order);
+            log.warn("Auto-approved return request for order {} after seller did not respond within  hours",
+                    saved.getId(), returnApprovalTimeoutHours);
+            // Check if both seller and admin have now approved
+            if (saved.isReturnAdminApproved()) {
+                // Finalize the return
+                saved.setStatus(OrderStatus.RETURNED);
+                orderRepository.save(saved);
+                publishAfterCommit(() -> paymentClient.refundDeposit(saved.getId()));
+                log.info("Return finalized for order {} after auto-approval", saved.getId());
+            }
+        }
+
+        log.info("Auto-approved {} timed-out return requests", timedOutReturns.size());
+    }
+
     private Order findOrder(Long orderId) {
         return orderRepository.findById(orderId)
                 .orElseThrow(() -> new OrderNotFoundException(orderId));
@@ -654,8 +703,14 @@ public class OrderServiceImpl implements OrderService {
         if (offer.getStatus() == OfferStatus.PENDING
                 && offer.getExpiresAt() != null
                 && offer.getExpiresAt().isBefore(LocalDateTime.now())) {
-            offer.setStatus(OfferStatus.EXPIRED);
-            return productOfferRepository.save(offer);
+            try {
+                offer.setStatus(OfferStatus.EXPIRED);
+                return productOfferRepository.save(offer);
+            } catch (OptimisticLockingFailureException ex) {
+                // Another thread already expired or modified this offer; refetch to get latest state
+                return productOfferRepository.findById(offer.getId())
+                        .orElseThrow(() -> new OrderStateException("Offer was not found"));
+            }
         }
         return offer;
     }
@@ -762,7 +817,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    public OrderResponseDTO requestReturn(Long orderId, String buyerId, String reason) {
+    public OrderResponseDTO requestReturn(Long orderId, String buyerId, String reason, List<MultipartFile> returnEvidenceImages) {
         Order order = findOrder(orderId);
         if (!order.getBuyerId().equals(buyerId)) {
             throw new OrderStateException("Only the buyer can request a return for this order");
@@ -776,14 +831,20 @@ public class OrderServiceImpl implements OrderService {
             throw new OrderStateException("The " + returnWindowDays + "-day return window has expired");
         }
 
+        // Return evidence images are required and validated
+        List<MultipartFile> normalizedReturnImages = normalizeImages(returnEvidenceImages);
+        fileValidator.validateImages(normalizedReturnImages); // Add validation
+        List<String> returnEvidenceUrls = saveUploadedFiles(normalizedReturnImages);
+
         order.setStatus(OrderStatus.RETURN_REQUESTED);
         order.setReturnReason(reason);
         order.setReturnRequestedAt(LocalDateTime.now());
         order.setReturnSellerApproved(false);
         order.setReturnAdminApproved(false);
         order.setReturnRejectReason(null);
+        order.setReturnEvidenceImages(writeJson(returnEvidenceUrls));
         Order saved = orderRepository.save(order);
-        log.info("Return requested for order {} by buyer {}", saved.getId(), buyerId);
+        log.info("Return requested for order {} by buyer {} with {} evidence images", saved.getId(), buyerId, returnEvidenceUrls.size());
         return toResponse(saved);
     }
 
@@ -854,13 +915,13 @@ public class OrderServiceImpl implements OrderService {
 
     private List<MultipartFile> normalizeImages(List<MultipartFile> images) {
         if (images == null || images.isEmpty()) {
-            throw new OrderStateException("At least one evidence image is required to confirm the order");
+            throw new OrderStateException("At least one evidence image is required");
         }
         List<MultipartFile> normalized = images.stream()
                 .filter(file -> file != null && !file.isEmpty())
                 .toList();
         if (normalized.isEmpty()) {
-            throw new OrderStateException("At least one evidence image is required to confirm the order");
+            throw new OrderStateException("At least one evidence image is required");
         }
         return normalized;
     }
@@ -935,6 +996,7 @@ public class OrderServiceImpl implements OrderService {
                 .sellerId(order.getSellerId())
                 .productId(order.getProductId())
                 .productTitle(order.getProductTitle())
+                .productImageUrl(order.getProductImageUrl())
                 .amount(order.getAmount())
                 .productAmount(resolveProductAmount(order, BigDecimal.ZERO))
                 .shippingFee(order.getShippingFee())
@@ -950,6 +1012,7 @@ public class OrderServiceImpl implements OrderService {
                 .returnAdminApproved(order.isReturnAdminApproved())
                 .returnRejectReason(order.getReturnRejectReason())
                 .evidenceImages(toAbsoluteEvidenceUrls(order.getEvidenceImages()))
+                .returnEvidenceImages(toAbsoluteEvidenceUrls(order.getReturnEvidenceImages()))
                 .createdAt(order.getCreatedAt())
                 .updatedAt(order.getUpdatedAt())
                 .build();

@@ -157,13 +157,14 @@ public class OrderController {
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Order confirmed successfully", response));
     }
 
-    @PostMapping("/{id}/return-request")
+    @PostMapping(value = "/{id}/return-request", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     public ResponseEntity<ApiResponse<OrderResponseDTO>> requestReturn(
             @PathVariable Long id,
-            @Valid @RequestBody ReturnActionRequestDTO request,
+            @RequestParam("reason") String reason,
+            @RequestPart("returnEvidenceImages") List<MultipartFile> returnEvidenceImages,
             @RequestHeader(value = "X-User-Id", required = false) String buyerId
     ) {
-        OrderResponseDTO response = orderService.requestReturn(id, requireUserId(buyerId), request.getReason());
+        OrderResponseDTO response = orderService.requestReturn(id, requireUserId(buyerId), reason, returnEvidenceImages);
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Return requested successfully", response));
     }
 

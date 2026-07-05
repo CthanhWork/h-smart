@@ -28,10 +28,11 @@ public class SearchController {
             @RequestParam(name = "category", required = false) String category,
             @RequestParam(name = "minPrice", required = false) BigDecimal minPrice,
             @RequestParam(name = "maxPrice", required = false) BigDecimal maxPrice,
+            @RequestParam(name = "provinceCode", required = false) String provinceCode,
             @PageableDefault(size = 12) Pageable pageable
     ) {
         PageResponseDTO<ProductSearchResponseDTO> products =
-                productSearchService.searchProducts(query, category, minPrice, maxPrice, pageable);
+                productSearchService.searchProducts(query, category, minPrice, maxPrice, provinceCode, pageable);
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Products searched successfully", products));
     }
 }

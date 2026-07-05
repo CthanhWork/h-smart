@@ -82,6 +82,9 @@ class OrderServiceImplTest {
     @Mock
     private com.hsmart.order.service.PaymentClient paymentClient;
 
+    @Mock
+    private com.hsmart.order.infrastructure.validation.FileValidator fileValidator;
+
     private OrderServiceImpl orderService;
 
     @BeforeEach
@@ -98,7 +101,8 @@ class OrderServiceImplTest {
                 paymentClient,
                 new StorageProperties(System.getProperty("java.io.tmpdir") + "/hsmart-order-test-uploads"),
                 new ApplicationProperties("http://localhost:8000"),
-                new ObjectMapper()
+                new ObjectMapper(),
+                fileValidator
         );
         lenient().when(orderRepository.save(any(Order.class))).thenAnswer(invocation -> invocation.getArgument(0));
         lenient().when(orderRepository.saveAll(any())).thenAnswer(invocation -> invocation.getArgument(0));
@@ -538,7 +542,8 @@ class OrderServiceImplTest {
                 paymentClient,
                 new StorageProperties(System.getProperty("java.io.tmpdir") + "/hsmart-order-test-uploads"),
                 new ApplicationProperties("http://localhost:8000"),
-                new ObjectMapper()
+                new ObjectMapper(),
+                fileValidator
         );
         given(productClient.getProduct(10L, "buyer-one")).willReturn(product());
         CreateOrderRequestDTO request = CreateOrderRequestDTO.builder()
@@ -636,7 +641,8 @@ class OrderServiceImplTest {
     void requestReturnShouldMoveCompletedOrderToReturnRequested() {
         given(orderRepository.findById(5L)).willReturn(java.util.Optional.of(completedOrder()));
 
-        OrderResponseDTO response = orderService.requestReturn(5L, "buyer-one", "San pham bi loi");
+        OrderResponseDTO response = orderService.requestReturn(5L, "buyer-one", "San pham bi loi",
+                java.util.List.of(mockMultipartFile()));
 
         assertThat(response.getStatus()).isEqualTo(OrderStatus.RETURN_REQUESTED);
         assertThat(response.getReturnReason()).isEqualTo("San pham bi loi");
@@ -646,7 +652,8 @@ class OrderServiceImplTest {
     void requestReturnShouldRejectWhenOrderNotCompleted() {
         given(orderRepository.findById(5L)).willReturn(java.util.Optional.of(pendingOrder()));
 
-        assertThatThrownBy(() -> orderService.requestReturn(5L, "buyer-one", "x"))
+        assertThatThrownBy(() -> orderService.requestReturn(5L, "buyer-one", "x",
+                java.util.List.of(mockMultipartFile())))
                 .isInstanceOf(com.hsmart.order.application.exceptions.OrderStateException.class);
     }
 
@@ -682,6 +689,10 @@ class OrderServiceImplTest {
 
     private java.util.List<org.springframework.web.multipart.MultipartFile> evidenceImages() {
         return java.util.List.of(new MockMultipartFile("files", "evidence.jpg", "image/jpeg", new byte[]{1, 2, 3}));
+    }
+
+    private org.springframework.web.multipart.MultipartFile mockMultipartFile() {
+        return new MockMultipartFile("file", "test.jpg", "image/jpeg", new byte[]{1, 2, 3});
     }
 
     private ProductResponseDTO product() {

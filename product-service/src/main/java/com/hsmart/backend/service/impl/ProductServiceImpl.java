@@ -10,7 +10,6 @@ import com.hsmart.backend.application.dto.ProductResponseDTO;
 import com.hsmart.backend.application.dto.ProductSearchEvent;
 import com.hsmart.backend.application.dto.ProductSoldEvent;
 import com.hsmart.backend.application.dto.ProductStatsResponseDTO;
-import com.hsmart.backend.application.dto.UserAddressResponseDTO;
 import com.hsmart.backend.application.exceptions.AiServiceTimeoutException;
 import com.hsmart.backend.application.exceptions.AiServiceUnavailableException;
 import com.hsmart.backend.application.exceptions.CategoryNotFoundException;
@@ -133,6 +132,7 @@ public class ProductServiceImpl implements ProductService {
                 request.isTitleModifiedByUser()
         );
 
+        applySellerLocationSnapshot(product);
         Product savedProduct = productRepository.save(product);
         publishProductCreatedAfterCommit(savedProduct);
         if (aiServiceFailure != null) {
@@ -180,6 +180,7 @@ public class ProductServiceImpl implements ProductService {
             product.setImageUrls(objectMapper.writeValueAsString(relativeImageUrls));
         }
 
+        applySellerLocationSnapshot(product);
         Product savedProduct = productRepository.save(product);
         publishProductUpdatedAfterCommit(savedProduct);
         if (isTransitionToSold(previousStatus, savedProduct.getStatus())) {
@@ -208,11 +209,13 @@ public class ProductServiceImpl implements ProductService {
             String keyword,
             ProductStatus status,
             Long categoryId,
+            String provinceCode,
             Pageable pageable
     ) {
         ProductStatus effectiveStatus = status != null ? status : null;
         Page<ProductResponseDTO> page = productRepository
-                .findAll(buildPublicProductSpecification(normalizeKeyword(keyword), effectiveStatus, categoryId), pageable)
+                .findAll(buildPublicProductSpecification(
+                        normalizeKeyword(keyword), effectiveStatus, categoryId, normalizeKeyword(provinceCode)), pageable)
                 .map(this::toProductResponse);
         return PageResponseDTO.from(page);
     }
@@ -318,6 +321,17 @@ public class ProductServiceImpl implements ProductService {
                 .build();
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public List<ProductSearchEvent> getAllVisibleProductsForSearchReconciliation() {
+        List<Product> visibleProducts = productRepository.findAllByIsDeletedFalseAndStatusIn(
+                EnumSet.of(ProductStatus.APPROVED, ProductStatus.ACTIVE));
+
+        return visibleProducts.stream()
+                .map(this::toProductSearchEvent)
+                .toList();
+    }
+
     private String getCurrentUserId() {
         return UserContextHolder.getCurrentUserId()
                 .orElseThrow(MissingUserContextException::new);
@@ -350,10 +364,17 @@ public class ProductServiceImpl implements ProductService {
     private Specification<Product> buildPublicProductSpecification(
             String keyword,
             ProductStatus requestedStatus,
-            Long categoryId
+            Long categoryId,
+            String provinceCode
     ) {
         Specification<Product> specification =
                 (root, query, criteriaBuilder) -> criteriaBuilder.isFalse(root.get("isDeleted"));
+
+        if (provinceCode != null) {
+            specification = specification.and(
+                    (root, query, criteriaBuilder) -> criteriaBuilder.equal(root.get("provinceCode"), provinceCode)
+            );
+        }
 
         if (requestedStatus != null) {
             specification = specification.and(
@@ -560,6 +581,8 @@ public class ProductServiceImpl implements ProductService {
                 .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
                 .status(product.getStatus() != null ? product.getStatus().name() : null)
                 .sellerId(product.getSellerId())
+                .provinceCode(product.getProvinceCode())
+                .province(product.getProvince())
                 .imageUrl(product.getImageUrl())
                 .aiMetadata(parseAiMetadata(product.getId(), product.getAiMetadata()))
                 .build();
@@ -637,14 +660,40 @@ public class ProductServiceImpl implements ProductService {
         List<String> imageUrls = parseImageUrls(product.getId(), product.getImageUrls());
         ProductResponseDTO response = productMapper.toResponse(product, aiMetadata, applicationProperties.publicBaseUrl());
         response.setImageUrls(toAbsoluteImageUrls(imageUrls, response.getImageUrl(), applicationProperties.publicBaseUrl()));
-        userAddressClient.getUserAddress(product.getSellerId())
-                .ifPresent(address -> enrichSellerLocation(response, address));
+        enrichSellerLocation(response, product);
         return response;
     }
 
-    private void enrichSellerLocation(ProductResponseDTO response, UserAddressResponseDTO address) {
-        response.setSellerDistrict(address.district());
-        response.setSellerProvince(address.province());
+    /**
+     * Populates seller location from the snapshot stored on the product (no remote call).
+     * Falls back to a live user-service lookup only for legacy products listed before the
+     * snapshot existed, so existing listings keep showing a location until they are re-saved.
+     */
+    private void enrichSellerLocation(ProductResponseDTO response, Product product) {
+        if (StringUtils.hasText(product.getProvince()) || StringUtils.hasText(product.getDistrict())) {
+            response.setSellerProvince(product.getProvince());
+            response.setSellerDistrict(product.getDistrict());
+            return;
+        }
+        userAddressClient.getUserAddress(product.getSellerId())
+                .ifPresent(address -> {
+                    response.setSellerProvince(address.province());
+                    response.setSellerDistrict(address.district());
+                });
+    }
+
+    /**
+     * Snapshots the seller's current province/district onto the product so that searching and
+     * listing can filter by location without a per-result remote call. Only overwrites when the
+     * lookup succeeds, preserving any existing snapshot if user-service is unavailable.
+     */
+    private void applySellerLocationSnapshot(Product product) {
+        userAddressClient.getUserAddress(product.getSellerId())
+                .ifPresent(address -> {
+                    product.setProvinceCode(address.provinceCode());
+                    product.setProvince(address.province());
+                    product.setDistrict(address.district());
+                });
     }
 
     private List<DetectionDTO> parseAiMetadata(Long productId, String aiMetadataJson) {

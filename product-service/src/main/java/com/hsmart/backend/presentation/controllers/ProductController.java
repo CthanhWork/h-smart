@@ -7,6 +7,7 @@ import com.hsmart.backend.application.dto.ProductListingSuggestionResponseDTO;
 import com.hsmart.backend.application.dto.ProductModerationStatusRequest;
 import com.hsmart.backend.application.dto.ProductRequestDTO;
 import com.hsmart.backend.application.dto.ProductResponseDTO;
+import com.hsmart.backend.application.dto.ProductSearchEvent;
 import com.hsmart.backend.application.dto.ProductStatsResponseDTO;
 import com.hsmart.backend.domain.entities.ProductStatus;
 import com.hsmart.backend.service.ProductImageAnalysisService;
@@ -133,12 +134,13 @@ public class ProductController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) ProductStatus status,
             @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) String provinceCode,
             @ParameterObject
             @PageableDefault(sort = "id", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         return ResponseEntity.ok(
                 ApiResponse.success(HttpStatus.OK, "Products fetched successfully",
-                        productService.getAllProducts(keyword, status, categoryId, pageable))
+                        productService.getAllProducts(keyword, status, categoryId, provinceCode, pageable))
         );
     }
 
@@ -195,5 +197,12 @@ public class ProductController {
     public ResponseEntity<ApiResponse<ProductStatsResponseDTO>> getInternalStats() {
         ProductStatsResponseDTO response = productService.getProductStats();
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Product stats fetched successfully", response));
+    }
+
+    @GetMapping("/internal/search-reconciliation")
+    public ResponseEntity<ApiResponse<List<ProductSearchEvent>>> getAllVisibleProductsForReconciliation() {
+        List<ProductSearchEvent> products = productService.getAllVisibleProductsForSearchReconciliation();
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK,
+            "Visible products fetched for search reconciliation", products));
     }
 }

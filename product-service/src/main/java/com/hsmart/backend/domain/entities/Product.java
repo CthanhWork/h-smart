@@ -58,6 +58,15 @@ public class Product {
     @Column(name = "seller_id", nullable = false, length = 150)
     private String sellerId;
 
+    @Column(name = "province_code", length = 20)
+    private String provinceCode;
+
+    @Column(name = "province", length = 100)
+    private String province;
+
+    @Column(name = "district", length = 100)
+    private String district;
+
     @Column(name = "image_url", columnDefinition = "text")
     private String imageUrl;
 

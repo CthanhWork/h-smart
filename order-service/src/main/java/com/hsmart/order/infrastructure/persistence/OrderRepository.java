@@ -42,4 +42,8 @@ public interface OrderRepository extends JpaRepository<Order, Long> {
 
     @Query("SELECT o FROM Order o WHERE (:status IS NULL OR o.status = :status) ORDER BY o.createdAt DESC")
     Page<Order> findAllForAdmin(@Param("status") OrderStatus status, Pageable pageable);
+
+    @Query("SELECT o FROM Order o WHERE o.status = com.hsmart.order.domain.entities.OrderStatus.RETURN_REQUESTED " +
+           "AND o.returnSellerApproved = false AND o.returnRequestedAt < :timeoutBefore")
+    List<Order> findReturnRequestsPendingSellerApproval(@Param("timeoutBefore") LocalDateTime timeoutBefore);
 }

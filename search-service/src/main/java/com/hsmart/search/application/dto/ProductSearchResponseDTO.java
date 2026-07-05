@@ -17,5 +17,7 @@ public class ProductSearchResponseDTO {
     private BigDecimal price;
     private String categoryName;
     private String status;
+    private String provinceCode;
+    private String province;
     private String imageUrl;
 }

@@ -27,6 +27,15 @@ springdoc:
 
 search:
   visible-statuses: ${SEARCH_VISIBLE_STATUSES:APPROVED,ACTIVE}
+  reconciliation:
+    enabled: ${SEARCH_RECONCILIATION_ENABLED:true}
+    cron: ${SEARCH_RECONCILIATION_CRON:0 0 2 * * *}
+    batch-size: ${SEARCH_RECONCILIATION_BATCH_SIZE:100}
+
+product-service:
+  base-url: ${PRODUCT_SERVICE_BASE_URL:http://product-service}
+  connect-timeout-ms: ${PRODUCT_SERVICE_CONNECT_TIMEOUT_MS:5000}
+  read-timeout-ms: ${PRODUCT_SERVICE_READ_TIMEOUT_MS:30000}
 
 internal:
   security:

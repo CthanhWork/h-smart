@@ -12,6 +12,9 @@ import com.hsmart.search.infrastructure.persistence.ProductSearchRepository;
 import com.hsmart.search.service.ProductSearchService;
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.domain.Pageable;
@@ -49,12 +52,13 @@ public class ProductSearchServiceImpl implements ProductSearchService {
             String category,
             BigDecimal minPrice,
             BigDecimal maxPrice,
+            String provinceCode,
             Pageable pageable
     ) {
         long startedAt = System.nanoTime();
 
         NativeQuery searchQuery = NativeQuery.builder()
-                .withQuery(buildSearchQuery(query, category, minPrice, maxPrice))
+                .withQuery(buildSearchQuery(query, category, minPrice, maxPrice, provinceCode))
                 .withPageable(pageable)
                 .build();
 
@@ -83,6 +87,8 @@ public class ProductSearchServiceImpl implements ProductSearchService {
                 .price(event.getPrice())
                 .categoryName(normalize(event.getCategoryName()))
                 .status(normalize(event.getStatus()))
+                .provinceCode(normalize(event.getProvinceCode()))
+                .province(normalize(event.getProvince()))
                 .imageUrl(normalize(event.getImageUrl()))
                 .build();
 
@@ -100,7 +106,15 @@ public class ProductSearchServiceImpl implements ProductSearchService {
         log.info("Removed product {} from Elasticsearch products_index", id);
     }
 
-    private Query buildSearchQuery(String query, String category, BigDecimal minPrice, BigDecimal maxPrice) {
+    @Override
+    public Set<Long> getAllIndexedProductIds() {
+        Iterable<ProductDocument> allProducts = productSearchRepository.findAll();
+        return StreamSupport.stream(allProducts.spliterator(), false)
+                .map(ProductDocument::getId)
+                .collect(Collectors.toSet());
+    }
+
+    private Query buildSearchQuery(String query, String category, BigDecimal minPrice, BigDecimal maxPrice, String provinceCode) {
         BoolQuery.Builder bool = new BoolQuery.Builder();
 
         if (StringUtils.hasText(query)) {
@@ -124,6 +138,13 @@ public class ProductSearchServiceImpl implements ProductSearchService {
             bool.filter(filter -> filter.match(match -> match
                     .field("categoryName")
                     .query(categoryText)));
+        }
+
+        if (StringUtils.hasText(provinceCode)) {
+            String provinceCodeText = provinceCode.trim();
+            bool.filter(filter -> filter.term(term -> term
+                    .field("provinceCode")
+                    .value(provinceCodeText)));
         }
 
         if (minPrice != null || maxPrice != null) {
@@ -150,6 +171,8 @@ public class ProductSearchServiceImpl implements ProductSearchService {
                 .price(document.getPrice())
                 .categoryName(document.getCategoryName())
                 .status(document.getStatus())
+                .provinceCode(document.getProvinceCode())
+                .province(document.getProvince())
                 .imageUrl(document.getImageUrl())
                 .build();
     }

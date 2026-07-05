@@ -20,6 +20,7 @@ public class OrderResponseDTO {
     private String sellerId;
     private Long productId;
     private String productTitle;
+    private String productImageUrl;
     private BigDecimal amount;
     private BigDecimal productAmount;
     private BigDecimal shippingFee;
@@ -35,6 +36,7 @@ public class OrderResponseDTO {
     private boolean returnAdminApproved;
     private String returnRejectReason;
     private List<String> evidenceImages;
+    private List<String> returnEvidenceImages;
     private LocalDateTime createdAt;
     private LocalDateTime updatedAt;
 }

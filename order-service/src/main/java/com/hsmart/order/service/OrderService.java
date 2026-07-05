@@ -29,7 +29,7 @@ public interface OrderService {
     void markSellerShippingPaid(Long orderId);
 
     // --- Đổi/trả hàng (return) ---
-    OrderResponseDTO requestReturn(Long orderId, String buyerId, String reason);
+    OrderResponseDTO requestReturn(Long orderId, String buyerId, String reason, List<MultipartFile> returnEvidenceImages);
     OrderResponseDTO sellerApproveReturn(Long orderId, String sellerId);
     OrderResponseDTO sellerRejectReturn(Long orderId, String sellerId, String reason);
     OrderResponseDTO adminApproveReturn(Long orderId);

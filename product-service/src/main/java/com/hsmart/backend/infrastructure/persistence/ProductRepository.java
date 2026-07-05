@@ -49,4 +49,6 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
             group by detection.value ->> 'label'
             """, nativeQuery = true)
     List<AveragePriceByLabelProjection> findAverageSoldPricesByAiLabel();
+
+    List<Product> findAllByIsDeletedFalseAndStatusIn(Collection<ProductStatus> statuses);
 }

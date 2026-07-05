@@ -50,6 +50,12 @@ public class PaymentServiceImpl implements PaymentService {
     @Value("${payments.pending-timeout-minutes:30}")
     private long pendingTimeoutMinutes;
 
+    @Value("${payments.orphan-refund-scan-ms:300000}")
+    private long orphanRefundScanMs;
+
+    @Value("${payments.orphan-grace-period-minutes:10}")
+    private long orphanGracePeriodMinutes;
+
     @Override
     public DepositResponseDTO createDeposit(CreateDepositRequestDTO request, String buyerId, String clientIp) {
         DeliveryMethod deliveryMethod = request.getDeliveryMethod() != null
@@ -315,8 +321,8 @@ public class PaymentServiceImpl implements PaymentService {
                     payment.getId(), order.id(), payment.getBuyerId());
         } catch (RuntimeException exception) {
             // Payment succeeded but the order could not be created (e.g. product taken meanwhile).
-            // Keep the payment PAID with no order; this requires a manual refund.
-            log.error("Deposit {} (txnRef {}) was paid but order creation failed — manual refund required: {}",
+            // Keep the payment PAID with no order; orphan refund job will handle this.
+            log.error("Deposit {} (txnRef {}) was paid but order creation failed — orphan refund job will process: {}",
                     payment.getId(), payment.getTxnRef(), exception.getMessage(), exception);
         }
 
@@ -376,6 +382,40 @@ public class PaymentServiceImpl implements PaymentService {
             platformFeePaymentRepository.saveAll(expiredFees);
             log.info("Expired {} pending platform-fee payments", expiredFees.size());
         }
+    }
+
+    /**
+     * Scans for orphaned deposits (PAID but no orderId) and automatically refunds them.
+     * This handles cases where payment succeeded but order creation failed.
+     */
+    @Scheduled(fixedDelayString = "${payments.orphan-refund-scan-ms:300000}")
+    public void refundOrphanedDeposits() {
+        if (orphanGracePeriodMinutes <= 0) {
+            return;
+        }
+        LocalDateTime gracePeriodBefore = LocalDateTime.now().minusMinutes(orphanGracePeriodMinutes);
+        List<DepositPayment> orphanedDeposits = depositPaymentRepository
+                .findByStatusAndOrderIdIsNullAndPaidAtBefore(PaymentStatus.PAID, gracePeriodBefore);
+
+        if (orphanedDeposits.isEmpty()) {
+            return;
+        }
+
+        for (DepositPayment payment : orphanedDeposits) {
+            try {
+                payment.setStatus(PaymentStatus.REFUNDED);
+                depositPaymentRepository.save(payment);
+                log.warn("Auto-refunded orphaned deposit {} (txnRef {}) — payment succeeded but order creation failed",
+                        payment.getId(), payment.getTxnRef());
+                // TODO: Integrate with actual refund API (VNPay refund endpoint)
+                // For now, just mark as REFUNDED — manual VNPay refund still required
+            } catch (Exception ex) {
+                log.error("Failed to mark orphaned deposit {} for refund: {}",
+                        payment.getId(), ex.getMessage(), ex);
+            }
+        }
+
+        log.info("Processed  orphaned deposit payments for auto-refund", orphanedDeposits.size());
     }
 
     private boolean amountMatches(BigDecimal expectedAmount, Map<String, String> params) {

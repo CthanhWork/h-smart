@@ -1,6 +1,7 @@
 package com.hsmart.backend.service;
 
 import com.hsmart.backend.application.dto.PageResponseDTO;
+import com.hsmart.backend.application.dto.ProductSearchEvent;
 import com.hsmart.backend.application.dto.ProductStatsResponseDTO;
 import com.hsmart.backend.application.dto.ProductRequestDTO;
 import com.hsmart.backend.application.dto.ProductResponseDTO;
@@ -14,7 +15,7 @@ public interface ProductService {
     ProductResponseDTO createProduct(ProductRequestDTO request, List<MultipartFile> images, int analysisImageIndex) throws IOException;
     ProductResponseDTO updateProduct(Long id, ProductRequestDTO request, List<MultipartFile> newImages) throws IOException;
     void deleteProduct(Long id);
-    PageResponseDTO<ProductResponseDTO> getAllProducts(String keyword, ProductStatus status, Long categoryId, Pageable pageable);
+    PageResponseDTO<ProductResponseDTO> getAllProducts(String keyword, ProductStatus status, Long categoryId, String provinceCode, Pageable pageable);
     PageResponseDTO<ProductResponseDTO> getMyProducts(Pageable pageable);
     PageResponseDTO<ProductResponseDTO> getWishlist(Pageable pageable);
     ProductResponseDTO getProductById(Long id);
@@ -23,4 +24,5 @@ public interface ProductService {
     void markProductSoldFromOrderEvent(Long productId);
     ProductResponseDTO updateModerationStatus(Long id, ProductStatus status);
     ProductStatsResponseDTO getProductStats();
+    List<ProductSearchEvent> getAllVisibleProductsForSearchReconciliation();
 }

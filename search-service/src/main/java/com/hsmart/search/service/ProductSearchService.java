@@ -4,6 +4,7 @@ import com.hsmart.search.application.dto.PageResponseDTO;
 import com.hsmart.search.application.dto.ProductSearchEvent;
 import com.hsmart.search.application.dto.ProductSearchResponseDTO;
 import java.math.BigDecimal;
+import java.util.Set;
 import org.springframework.data.domain.Pageable;
 
 public interface ProductSearchService {
@@ -12,10 +13,13 @@ public interface ProductSearchService {
             String category,
             BigDecimal minPrice,
             BigDecimal maxPrice,
+            String provinceCode,
             Pageable pageable
     );
 
     void indexProduct(ProductSearchEvent event);
 
     void deleteProduct(Long id);
+
+    Set<Long> getAllIndexedProductIds();
 }
