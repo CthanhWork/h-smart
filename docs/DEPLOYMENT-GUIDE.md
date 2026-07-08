@@ -5,20 +5,19 @@ It intentionally excludes first-time server provisioning details.
 
 ## 1. Current Live Target
 
-- SSH: `root@100.66.247.41`
-- Tailscale hostname: `instance-20260601-031713.tail0e1958.ts.net`
-- Public IP: `34.126.116.93`
-- Live repo: `/home/thanh678x/h-smart`
-- Compose file: `docker-compose-gcp.yml`
+- SSH: `hoangchithanh23072003@100.110.169.59`
+- Public IP: `100.110.169.59`
+- Live repo: `/home/hoangchithanh23072003/h-smart`
+- Compose file: `docker-compose.yml` (hoặc `docker-compose-gcp.yml` nếu giữ tên cũ)
 - Public app port: `8000`
 
-Use the Tailscale IP by default:
+Use SSH with key:
 
 ```bash
-ssh root@100.66.247.41
+ssh -i ~/.ssh/id_rsa_hsmart_new hoangchithanh23072003@100.110.169.59
 ```
 
-If Tailscale asks for browser approval, complete it and retry SSH.
+**Note**: VPS cũ (`103.145.63.51` / `100.66.247.41`) đã ngừng sử dụng. Migration sang VPS mới hoàn tất vào 2026-07-08.
 
 ## 2. What Runs On The VPS
 
@@ -44,12 +43,12 @@ Important:
 Use this when the target code is already pushed to the branch used on the VPS.
 
 ```bash
-ssh root@100.66.247.41
-cd /home/thanh678x/h-smart
+ssh -i ~/.ssh/id_rsa_hsmart_new hoangchithanh23072003@100.110.169.59
+cd /home/hoangchithanh23072003/h-smart
 git pull --ff-only
-docker compose -f docker-compose-gcp.yml config --quiet
-docker compose -f docker-compose-gcp.yml up -d --build
-docker compose -f docker-compose-gcp.yml ps
+docker compose -f docker-compose.yml config --quiet
+docker compose -f docker-compose.yml up -d --build
+docker compose -f docker-compose.yml ps
 curl --fail http://127.0.0.1:8000/health
 ```
 
@@ -74,43 +73,43 @@ git ls-files --cached --others --exclude-standard |
   } | Set-Content -Encoding Ascii $list
 
 tar -czf $archive -T $list
-scp $archive root@100.66.247.41:/tmp/h-smart-deploy-source.tar.gz
+scp -i ~/.ssh/id_rsa_hsmart_new $archive hoangchithanh23072003@100.110.169.59:/tmp/h-smart-deploy-source.tar.gz
 ```
 
 Step 2 on the VPS:
 
 ```bash
-ssh root@100.66.247.41 '
+ssh -i ~/.ssh/id_rsa_hsmart_new hoangchithanh23072003@100.110.169.59 '
   set -e
-  mkdir -p /home/thanh678x/deploy-backups
+  mkdir -p /home/hoangchithanh23072003/deploy-backups
   ts=$(date +%Y%m%d-%H%M%S)
-  tar -czf /home/thanh678x/deploy-backups/h-smart-repo-$ts.tar.gz \
-    -C /home/thanh678x h-smart
+  tar -czf /home/hoangchithanh23072003/deploy-backups/h-smart-repo-$ts.tar.gz \
+    -C /home/hoangchithanh23072003 h-smart
   stage=/tmp/h-smart-sync-$ts
   rm -rf "$stage"
   mkdir -p "$stage"
   tar -xzf /tmp/h-smart-deploy-source.tar.gz -C "$stage"
   rsync -a --delete --exclude .env --exclude .git \
-    "$stage"/ /home/thanh678x/h-smart/
+    "$stage"/ /home/hoangchithanh23072003/h-smart/
   rm -rf "$stage"
-  cd /home/thanh678x/h-smart
-  docker compose -f docker-compose-gcp.yml config --quiet
-  docker compose -f docker-compose-gcp.yml up -d --build
-  docker compose -f docker-compose-gcp.yml ps
+  cd /home/hoangchithanh23072003/h-smart
+  docker compose -f docker-compose.yml config --quiet
+  docker compose -f docker-compose.yml up -d --build
+  docker compose -f docker-compose.yml ps
   curl --fail http://127.0.0.1:8000/health
 '
 ```
 
 This flow preserves:
 
-- `/home/thanh678x/h-smart/.env`
+- `/home/hoangchithanh23072003/h-smart/.env`
 - the VPS `.git` directory
 - Docker volumes
 
 Backups are stored under:
 
 ```bash
-/home/thanh678x/deploy-backups
+/home/hoangchithanh23072003/deploy-backups
 ```
 
 ## 4. Fast Verification
@@ -118,11 +117,11 @@ Backups are stored under:
 Run this after every deploy:
 
 ```bash
-ssh root@100.66.247.41 '
-  cd /home/thanh678x/h-smart
-  docker compose -f docker-compose-gcp.yml ps
+ssh -i ~/.ssh/id_rsa_hsmart_new hoangchithanh23072003@100.110.169.59 '
+  cd /home/hoangchithanh23072003/h-smart
+  docker compose -f docker-compose.yml ps
   curl --fail http://127.0.0.1:8000/health
-  docker compose -f docker-compose-gcp.yml logs --tail=80 \
+  docker compose -f docker-compose.yml logs --tail=80 \
     api-gateway product-service order-service user-service \
     review-service admin-service interaction-service search-service
 '
@@ -171,29 +170,29 @@ The final query must return `0`.
 Restart one service:
 
 ```bash
-cd /home/thanh678x/h-smart
-docker compose -f docker-compose-gcp.yml restart product-service
+cd /home/hoangchithanh23072003/h-smart
+docker compose -f docker-compose.yml restart product-service
 ```
 
 Rebuild one service:
 
 ```bash
-cd /home/thanh678x/h-smart
-docker compose -f docker-compose-gcp.yml up -d --build product-service
+cd /home/hoangchithanh23072003/h-smart
+docker compose -f docker-compose.yml up -d --build product-service
 ```
 
 Follow logs:
 
 ```bash
-cd /home/thanh678x/h-smart
-docker compose -f docker-compose-gcp.yml logs -f --tail=200
+cd /home/hoangchithanh23072003/h-smart
+docker compose -f docker-compose.yml logs -f --tail=200
 ```
 
 Stop containers without deleting data:
 
 ```bash
-cd /home/thanh678x/h-smart
-docker compose -f docker-compose-gcp.yml down
+cd /home/hoangchithanh23072003/h-smart
+docker compose -f docker-compose.yml down
 ```
 
 Do not use `down -v` on production unless data loss is acceptable.
