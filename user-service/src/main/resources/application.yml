@@ -1,6 +1,10 @@
 spring:
   application:
     name: user-service
+  servlet:
+    multipart:
+      max-file-size: ${USER_MEDIA_MAX_FILE_SIZE:20MB}
+      max-request-size: ${USER_MEDIA_MAX_REQUEST_SIZE:20MB}
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://user-postgres-db:5432/hsmart_user_db}
     username: ${SPRING_DATASOURCE_USERNAME:hsmart}

@@ -18,8 +18,8 @@ x-spring-environment: &spring-environment
 x-healthcheck: &spring-healthcheck
   interval: 10s
   timeout: 5s
-  retries: 10
-  start_period: 30s
+  retries: 25
+  start_period: 90s
 
 services:
   user-postgres-db:
@@ -149,7 +149,7 @@ services:
       - h-smart-internal
 
   interaction-mongo-db:
-    image: mongo:7
+    image: mongo:4.4
     container_name: h-smart-interaction-mongo-db
     restart: unless-stopped
     environment:
@@ -160,7 +160,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - mongosh --quiet --username "$$MONGO_INITDB_ROOT_USERNAME" --password "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping').ok" localhost:27017/admin | grep 1
+        - mongo --quiet --username "$$MONGO_INITDB_ROOT_USERNAME" --password "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping').ok" localhost:27017/admin | grep 1
       interval: 10s
       timeout: 5s
       retries: 10
@@ -301,7 +301,7 @@ services:
       <<: *spring-environment
       SERVER_PORT: "8082"
       APP_PUBLIC_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
-      AI_SERVICE_BASE_URL: ${EXTERNAL_AI_SERVICE_URL:?EXTERNAL_AI_SERVICE_URL is required}
+      AI_SERVICE_BASE_URL: http://ai-service:8000
       AI_SERVICE_CONNECT_TIMEOUT_MS: ${AI_SERVICE_CONNECT_TIMEOUT_MS:-2000}
       AI_SERVICE_READ_TIMEOUT_MS: ${AI_SERVICE_READ_TIMEOUT_MS:-60000}
       INTERACTION_SERVICE_BASE_URL: http://interaction-service:8083
@@ -619,7 +619,7 @@ services:
       JAVA_OPTS: "-Xms512m -Xmx512m -Dresilience4j.timelimiter.instances.assistantCircuitBreaker.timeoutDuration=${ASSISTANT_CIRCUIT_BREAKER_TIMEOUT:-60s} -Dresilience4j.timelimiter.instances.assistantCircuitBreaker.cancelRunningFuture=false"
       SERVER_PORT: "8000"
       APP_CORS_ALLOWED_ORIGIN_PATTERNS: ${APP_CORS_ALLOWED_ORIGIN_PATTERNS:-http://localhost:3000,http://localhost:5173,https://hsmart.thatcherdev.id.vn,https://instance-20260601-031713.tail0e1958.ts.net}
-      AI_SERVICE_URL: ${EXTERNAL_AI_SERVICE_URL:?EXTERNAL_AI_SERVICE_URL is required}
+      AI_SERVICE_URL: http://ai-service:8000
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       GATEWAY_RESPONSE_TIMEOUT: ${GATEWAY_RESPONSE_TIMEOUT:-120s}
       SPRING_DATA_REDIS_HOST: redis
@@ -634,20 +634,6 @@ services:
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "0.0"
     depends_on:
       discovery-server:
-        condition: service_healthy
-      user-service:
-        condition: service_healthy
-      product-service:
-        condition: service_healthy
-      interaction-service:
-        condition: service_healthy
-      order-service:
-        condition: service_healthy
-      payment-service:
-        condition: service_healthy
-      review-service:
-        condition: service_healthy
-      admin-service:
         condition: service_healthy
       redis:
         condition: service_healthy

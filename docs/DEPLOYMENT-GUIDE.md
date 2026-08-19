@@ -1,23 +1,39 @@
 # H-Smart Live VPS Deploy Guide
 
-This file is the short runbook for daily deployments to the current live VPS.
-It intentionally excludes first-time server provisioning details.
+This is the short runbook for daily deployments to the current live VPS.
+It is meant for agents and humans who need to test and deploy quickly.
 
 ## 1. Current Live Target
 
-- SSH: `hoangchithanh23072003@100.110.169.59`
+- SSH user and host: `hoangchithanh23072003@100.110.169.59`
 - Public IP: `100.110.169.59`
 - Live repo: `/home/hoangchithanh23072003/h-smart`
-- Compose file: `docker-compose.yml` (hoặc `docker-compose-gcp.yml` nếu giữ tên cũ)
+- Live compose file: `docker-compose-gcp.yml`
 - Public app port: `8000`
 
-Use SSH with key:
+Preferred SSH command:
 
 ```bash
 ssh -i ~/.ssh/id_rsa_hsmart_new hoangchithanh23072003@100.110.169.59
 ```
 
-**Note**: VPS cũ (`103.145.63.51` / `100.66.247.41`) đã ngừng sử dụng. Migration sang VPS mới hoàn tất vào 2026-07-08.
+Windows PowerShell:
+
+```powershell
+ssh -i $env:USERPROFILE\.ssh\id_rsa_hsmart_new hoangchithanh23072003@100.110.169.59
+```
+
+Live `.env` must keep:
+
+```env
+PUBLIC_API_BASE_URL=https://hsmart.thatcherdev.id.vn
+```
+
+Notes:
+
+- The old VPS (`103.145.63.51` / `100.66.247.41`) is no longer the active production target.
+- The current live backend is on `100.110.169.59`.
+- `ai-service` is not running inside the live VPS compose stack right now.
 
 ## 2. What Runs On The VPS
 
@@ -35,6 +51,7 @@ Important:
 - only port `8000` is published to the host
 - `ai-service` is not part of `docker-compose-gcp.yml`
 - internal databases and service ports must stay private
+- `product-service` and `api-gateway` both consume `EXTERNAL_AI_SERVICE_URL`
 
 ## 3. Fastest Deploy
 
@@ -46,9 +63,9 @@ Use this when the target code is already pushed to the branch used on the VPS.
 ssh -i ~/.ssh/id_rsa_hsmart_new hoangchithanh23072003@100.110.169.59
 cd /home/hoangchithanh23072003/h-smart
 git pull --ff-only
-docker compose -f docker-compose.yml config --quiet
-docker compose -f docker-compose.yml up -d --build
-docker compose -f docker-compose.yml ps
+docker compose -f docker-compose-gcp.yml config --quiet
+docker compose -f docker-compose-gcp.yml up -d --build
+docker compose -f docker-compose-gcp.yml ps
 curl --fail http://127.0.0.1:8000/health
 ```
 
@@ -93,9 +110,9 @@ ssh -i ~/.ssh/id_rsa_hsmart_new hoangchithanh23072003@100.110.169.59 '
     "$stage"/ /home/hoangchithanh23072003/h-smart/
   rm -rf "$stage"
   cd /home/hoangchithanh23072003/h-smart
-  docker compose -f docker-compose.yml config --quiet
-  docker compose -f docker-compose.yml up -d --build
-  docker compose -f docker-compose.yml ps
+  docker compose -f docker-compose-gcp.yml config --quiet
+  docker compose -f docker-compose-gcp.yml up -d --build
+  docker compose -f docker-compose-gcp.yml ps
   curl --fail http://127.0.0.1:8000/health
 '
 ```
@@ -119,11 +136,11 @@ Run this after every deploy:
 ```bash
 ssh -i ~/.ssh/id_rsa_hsmart_new hoangchithanh23072003@100.110.169.59 '
   cd /home/hoangchithanh23072003/h-smart
-  docker compose -f docker-compose.yml ps
+  docker compose -f docker-compose-gcp.yml ps
   curl --fail http://127.0.0.1:8000/health
-  docker compose -f docker-compose.yml logs --tail=80 \
+  docker compose -f docker-compose-gcp.yml logs --tail=80 \
     api-gateway product-service order-service user-service \
-    review-service admin-service interaction-service search-service
+    review-service admin-service interaction-service search-service payment-service
 '
 ```
 
@@ -150,7 +167,7 @@ docker exec h-smart-review-postgres-db \
   -c 'UPDATE reviews SET updated_at = created_at WHERE updated_at IS NULL;' \
   -c 'ALTER TABLE reviews ALTER COLUMN updated_at SET NOT NULL;'
 
-cd /home/thanh678x/h-smart
+cd /home/hoangchithanh23072003/h-smart
 docker compose -f docker-compose-gcp.yml restart review-service
 docker compose -f docker-compose-gcp.yml ps review-service
 ```
@@ -171,28 +188,28 @@ Restart one service:
 
 ```bash
 cd /home/hoangchithanh23072003/h-smart
-docker compose -f docker-compose.yml restart product-service
+docker compose -f docker-compose-gcp.yml restart product-service
 ```
 
 Rebuild one service:
 
 ```bash
 cd /home/hoangchithanh23072003/h-smart
-docker compose -f docker-compose.yml up -d --build product-service
+docker compose -f docker-compose-gcp.yml up -d --build product-service
 ```
 
 Follow logs:
 
 ```bash
 cd /home/hoangchithanh23072003/h-smart
-docker compose -f docker-compose.yml logs -f --tail=200
+docker compose -f docker-compose-gcp.yml logs -f --tail=200
 ```
 
 Stop containers without deleting data:
 
 ```bash
 cd /home/hoangchithanh23072003/h-smart
-docker compose -f docker-compose.yml down
+docker compose -f docker-compose-gcp.yml down
 ```
 
 Do not use `down -v` on production unless data loss is acceptable.
@@ -203,3 +220,29 @@ Do not use `down -v` on production unless data loss is acceptable.
 - publish only port `8000`
 - do not expose PostgreSQL, MongoDB, Redis, RabbitMQ, or Eureka publicly
 - back up before syncing an uncommitted working tree to the VPS
+
+## 8. AI Service Status
+
+Current state as of 2026-07-09:
+
+- `ai-service` now runs inside `docker-compose-gcp.yml` on the live VPS.
+- Both `product-service` and `api-gateway` point to `http://ai-service:8000`.
+- The service uses the model at `/app/models/household_yolo26n_best.pt`.
+- Health check:
+  - `GET http://ai-service:8000/health`
+  - `GET http://127.0.0.1:8000/health` for the gateway
+
+Useful checks:
+
+```bash
+docker compose -f docker-compose-gcp.yml ps ai-service
+curl --fail http://ai-service:8000/health
+curl --fail http://127.0.0.1:8000/health
+```
+
+If AI features break after a deploy:
+
+- check `ai-service` logs first
+- confirm the model file exists in `/home/hoangchithanh23072003/h-smart/ai-service/models/household_yolo26n_best.pt`
+- confirm `product-service` and `api-gateway` were restarted after the stack update
+- do not assume the old external AI endpoint is still usable

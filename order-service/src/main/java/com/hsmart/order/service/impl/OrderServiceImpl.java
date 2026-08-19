@@ -184,8 +184,11 @@ public class OrderServiceImpl implements OrderService {
                 "guest",
                 "Guest buyer",
                 "0900000000",
+                null,
                 province.trim(),
+                null,
                 district.trim(),
+                null,
                 "Unknown ward",
                 "Guest address"
         );

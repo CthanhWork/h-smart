@@ -76,3 +76,11 @@ ai-service/models/*.pkl
 !ai-service/models/README.md
 !ai-service/models/classes.json
 !ai-service/models/config_infer.yaml
+
+# Backups and temporary dumps
+backups/
+do an tot nghiep/
+*.csv
+*-hashes*.txt
+*.png
+restore_unsplash.js
