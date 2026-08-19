@@ -22,17 +22,22 @@ spring:
     host: localhost
     port: 1025
 app:
+  public-base-url: http://localhost:8000
   jwt:
     secret: UFdHZG1lU3Q2UTNYV2lBc1pDajFuWWtFaWpNd2pmd0h6aFZ4T3V0bE1YQU5SVEtrQ1VGVW9vV1h6S1J4bw==
     expiration-ms: 86400000
   mail:
     enabled: false
     from: no-reply@hsmart.local
+storage:
+  upload-dir: uploads
 account:
   lifecycle:
     frontend-base-url: http://localhost:5173
     verification-token-minutes: 1440
     password-reset-token-minutes: 30
+    email-change-token-minutes: 30
+    refresh-token-minutes: 10080
 springdoc:
   api-docs:
     enabled: false

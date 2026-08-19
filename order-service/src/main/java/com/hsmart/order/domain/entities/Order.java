@@ -10,8 +10,11 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.PreUpdate;
 import jakarta.persistence.Table;
+import jakarta.persistence.Version;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -47,6 +50,21 @@ public class Order {
     @Column(name = "shipping_fee", nullable = false, precision = 12, scale = 2, columnDefinition = "numeric(12,2) default 0")
     private BigDecimal shippingFee;
 
+    /** Platform fee the seller pays at confirmation = min(shippingFee, productAmount * maxRate). */
+    @Column(name = "platform_fee", nullable = false, precision = 12, scale = 2, columnDefinition = "numeric(12,2) default 0")
+    private BigDecimal platformFee;
+
+    /** Set once the seller has paid the platform fee (gates order confirmation). */
+    @Column(name = "seller_shipping_fee_paid", nullable = false, columnDefinition = "boolean default false")
+    private boolean sellerShippingFeePaid;
+
+    @Column(name = "product_title", length = 255)
+    private String productTitle;
+
+    /** Snapshot of the product image at order time so cancelled/relisted orders still render. */
+    @Column(name = "product_image_url", length = 512)
+    private String productImageUrl;
+
     @Column(name = "tracking_code", length = 100)
     private String trackingCode;
 
@@ -58,11 +76,44 @@ public class Order {
     @Column(nullable = false, length = 20)
     private OrderStatus status;
 
+    @Column(name = "completed_at")
+    private LocalDateTime completedAt;
+
+    // --- Return (đổi/trả hàng) ---
+    @Column(name = "return_reason", length = 500)
+    private String returnReason;
+
+    @Column(name = "return_requested_at")
+    private LocalDateTime returnRequestedAt;
+
+    @Column(name = "return_seller_approved", nullable = false, columnDefinition = "boolean default false")
+    private boolean returnSellerApproved;
+
+    @Column(name = "return_admin_approved", nullable = false, columnDefinition = "boolean default false")
+    private boolean returnAdminApproved;
+
+    @Column(name = "return_reject_reason", length = 500)
+    private String returnRejectReason;
+
+    /** JSON array of relative media URLs captured by the seller before shipping (quality evidence). */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "evidence_images", columnDefinition = "jsonb")
+    private String evidenceImages;
+
+    /** JSON array of relative media URLs uploaded by the buyer when requesting a return. */
+    @JdbcTypeCode(SqlTypes.JSON)
+    @Column(name = "return_evidence_images", columnDefinition = "jsonb")
+    private String returnEvidenceImages;
+
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
+
+    @Version
+    @Column(name = "version", nullable = false)
+    private Long version;
 
     @PrePersist
     public void prePersist() {
@@ -74,6 +125,9 @@ public class Order {
         }
         if (shippingFee == null) {
             shippingFee = BigDecimal.ZERO;
+        }
+        if (platformFee == null) {
+            platformFee = BigDecimal.ZERO;
         }
         if (productAmount == null && amount != null) {
             productAmount = amount.subtract(shippingFee);

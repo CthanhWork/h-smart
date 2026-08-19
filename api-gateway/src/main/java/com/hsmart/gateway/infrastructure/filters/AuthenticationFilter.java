@@ -29,24 +29,31 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
     private static final String BEARER_PREFIX = "Bearer ";
     private static final String INVALID_TOKEN_MESSAGE = "Invalid or missing security token";
     private static final String ADMIN_REQUIRED_MESSAGE = "Admin role is required";
+    private static final String INTERNAL_ROUTE_MESSAGE = "Internal routes are not accessible through the gateway";
     private static final String WEBSOCKET_PATH_PREFIX = "/api/v1/interactions/ws";
     private static final String ADMIN_PATH_PREFIX = "/api/v1/admin/";
     private static final String PRODUCTS_PATH = "/api/v1/products";
     private static final String PRODUCT_CATEGORIES_PATH = "/api/v1/products/categories";
+    private static final String INTERNAL_PATH_SEGMENT = "/internal/";
     private static final List<String> PUBLIC_PATHS = List.of(
             "/api/v1/auth/**",
             "/api/v1/locations/**",
+            "/api/v1/users/media/**",
             "/api/v1/products/media/**",
+            "/api/v1/orders/media/**",
+            "/api/v1/interactions/media/**",
             "/api/v1/search/**",
             "/api/v1/orders/shipping-estimate/guest",
             "/api/v1/orders/internal/ghtk-webhook",
+            "/api/v1/payments/vnpay/return",
+            "/api/v1/payments/vnpay/ipn",
             "/health",
             "/v3/api-docs/**",
             "/swagger-ui/**",
             "/swagger-ui.html"
     );
     private static final List<String> PUBLIC_GET_PATHS = List.of(
-            "/api/v1/reviews/**",
+            "/api/v1/reviews/sellers/**",
             PRODUCT_CATEGORIES_PATH
     );
 
@@ -67,6 +74,10 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
 
             if (isPublicRequest(exchange, path)) {
                 return chain.filter(exchange);
+            }
+            if (isBlockedInternalRequest(path)) {
+                log.warn("Blocked external access to internal path {}", path);
+                return writeForbiddenResponse(exchange, INTERNAL_ROUTE_MESSAGE);
             }
 
             String authorization = resolveAuthorizationHeader(exchange, path);
@@ -132,6 +143,10 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
         return !productId.isBlank() && productId.chars().allMatch(Character::isDigit);
     }
 
+    private boolean isBlockedInternalRequest(String path) {
+        return path.contains(INTERNAL_PATH_SEGMENT);
+    }
+
     private String resolveAuthorizationHeader(ServerWebExchange exchange, String path) {
         String authorization = exchange.getRequest().getHeaders().getFirst(HttpHeaders.AUTHORIZATION);
         if (authorization != null) {
@@ -164,10 +179,14 @@ public class AuthenticationFilter extends AbstractGatewayFilterFactory<Authentic
     }
 
     private Mono<Void> writeForbiddenResponse(ServerWebExchange exchange) {
+        return writeForbiddenResponse(exchange, ADMIN_REQUIRED_MESSAGE);
+    }
+
+    private Mono<Void> writeForbiddenResponse(ServerWebExchange exchange, String message) {
         exchange.getResponse().setStatusCode(HttpStatus.FORBIDDEN);
         exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
 
-        byte[] payload = toJsonBytes(ApiResponse.error(HttpStatus.FORBIDDEN.value(), ADMIN_REQUIRED_MESSAGE));
+        byte[] payload = toJsonBytes(ApiResponse.error(HttpStatus.FORBIDDEN.value(), message));
         DataBuffer buffer = exchange.getResponse().bufferFactory().wrap(payload);
         return exchange.getResponse().writeWith(Mono.just(buffer));
     }

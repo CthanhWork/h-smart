@@ -11,6 +11,13 @@ public record AssistantProperties(
         int readTimeoutMs,
         int historyLimit,
         String assistantId,
-        String systemPrompt
+        String systemPrompt,
+        double temperature,
+        int maxTokens,
+        double frequencyPenalty,
+        double productDescriptionTemperature,
+        int productDescriptionMaxTokens,
+        String embeddingModel,
+        boolean hybridSearchEnabled
 ) {
 }

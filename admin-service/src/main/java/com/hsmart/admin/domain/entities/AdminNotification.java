@@ -28,6 +28,9 @@ public class AdminNotification {
     @Column(name = "product_id", nullable = false)
     private Long productId;
 
+    @Column(name = "report_id")
+    private Long reportId;
+
     @Column(nullable = false, length = 250)
     private String title;
 
@@ -43,6 +46,15 @@ public class AdminNotification {
     @Builder.Default
     @Column(nullable = false, columnDefinition = "boolean default false")
     private boolean processed = false;
+
+    @Column(name = "processed_at")
+    private LocalDateTime processedAt;
+
+    @Column(name = "processed_by", length = 150)
+    private String processedBy;
+
+    @Column(name = "resolution_reason", columnDefinition = "text")
+    private String resolutionReason;
 
     @PrePersist
     public void applyDefaults() {

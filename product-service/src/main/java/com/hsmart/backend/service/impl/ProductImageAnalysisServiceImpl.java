@@ -29,6 +29,16 @@ public class ProductImageAnalysisServiceImpl implements ProductImageAnalysisServ
     @Override
     public ImageAnalysisResponseDTO analyzeImage(MultipartFile file) {
         PredictResponseDTO aiMetadata = visionService.detectObjects(file);
+
+        if (productNamingSupport.isUnrecognized(aiMetadata)) {
+            log.info("AI did not recognize any object in the image; returning an empty suggestion so the seller can name it");
+            return ImageAnalysisResponseDTO.builder()
+                    .suggestedName("")
+                    .suggestedPrice(null)
+                    .aiMetadata(aiMetadata)
+                    .build();
+        }
+
         String label = resolveLabel(aiMetadata);
         BigDecimal suggestedPrice = priceSuggestionService.findSuggestedPrice(label).orElse(null);
         String suggestedName = resolveSuggestedName(aiMetadata, label);

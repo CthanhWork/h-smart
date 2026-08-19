@@ -7,6 +7,7 @@ import com.hsmart.backend.application.dto.ProductListingSuggestionResponseDTO;
 import com.hsmart.backend.application.dto.ProductModerationStatusRequest;
 import com.hsmart.backend.application.dto.ProductRequestDTO;
 import com.hsmart.backend.application.dto.ProductResponseDTO;
+import com.hsmart.backend.application.dto.ProductSearchEvent;
 import com.hsmart.backend.application.dto.ProductStatsResponseDTO;
 import com.hsmart.backend.domain.entities.ProductStatus;
 import com.hsmart.backend.service.ProductImageAnalysisService;
@@ -110,12 +111,15 @@ public class ProductController {
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Product listing suggestions prepared successfully", response));
     }
 
-    @PutMapping("/{id}")
+    @PutMapping(value = "/{id}", consumes = {MediaType.MULTIPART_FORM_DATA_VALUE, MediaType.APPLICATION_FORM_URLENCODED_VALUE})
     public ResponseEntity<ApiResponse<ProductResponseDTO>> updateProduct(
             @PathVariable Long id,
-            @Valid @ModelAttribute ProductRequestDTO request
-    ) {
-        ProductResponseDTO response = productService.updateProduct(id, request);
+            @Valid @ModelAttribute ProductRequestDTO request,
+            @RequestPart(name = "files", required = false) List<MultipartFile> files,
+            @RequestPart(name = "file", required = false) MultipartFile file
+    ) throws IOException {
+        List<MultipartFile> newImages = normalizeFiles(files, file);
+        ProductResponseDTO response = productService.updateProduct(id, request, newImages.isEmpty() ? null : newImages);
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Product updated successfully", response));
     }
 
@@ -130,12 +134,13 @@ public class ProductController {
             @RequestParam(required = false) String keyword,
             @RequestParam(required = false) ProductStatus status,
             @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) String provinceCode,
             @ParameterObject
             @PageableDefault(sort = "id", direction = Sort.Direction.DESC) Pageable pageable
     ) {
         return ResponseEntity.ok(
                 ApiResponse.success(HttpStatus.OK, "Products fetched successfully",
-                        productService.getAllProducts(keyword, status, categoryId, pageable))
+                        productService.getAllProducts(keyword, status, categoryId, provinceCode, pageable))
         );
     }
 
@@ -143,6 +148,16 @@ public class ProductController {
     public ResponseEntity<ApiResponse<Void>> toggleProductLike(@PathVariable Long id) {
         String message = productService.toggleProductLike(id);
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, message, null));
+    }
+
+    @GetMapping("/mine")
+    public ResponseEntity<ApiResponse<PageResponseDTO<ProductResponseDTO>>> getMyProducts(
+            @ParameterObject
+            @PageableDefault(sort = "id", direction = Sort.Direction.DESC) Pageable pageable
+    ) {
+        return ResponseEntity.ok(
+                ApiResponse.success(HttpStatus.OK, "My products fetched successfully", productService.getMyProducts(pageable))
+        );
     }
 
     @GetMapping("/wishlist")
@@ -162,6 +177,13 @@ public class ProductController {
         );
     }
 
+    @GetMapping("/internal/{id}")
+    public ResponseEntity<ApiResponse<ProductResponseDTO>> getProductByIdForAdmin(@PathVariable Long id) {
+        return ResponseEntity.ok(
+                ApiResponse.success(HttpStatus.OK, "Product fetched successfully", productService.getProductByIdForAdmin(id))
+        );
+    }
+
     @PutMapping("/internal/{id}/moderation-status")
     public ResponseEntity<ApiResponse<ProductResponseDTO>> updateModerationStatus(
             @PathVariable Long id,
@@ -175,5 +197,12 @@ public class ProductController {
     public ResponseEntity<ApiResponse<ProductStatsResponseDTO>> getInternalStats() {
         ProductStatsResponseDTO response = productService.getProductStats();
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Product stats fetched successfully", response));
+    }
+
+    @GetMapping("/internal/search-reconciliation")
+    public ResponseEntity<ApiResponse<List<ProductSearchEvent>>> getAllVisibleProductsForReconciliation() {
+        List<ProductSearchEvent> products = productService.getAllVisibleProductsForSearchReconciliation();
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK,
+            "Visible products fetched for search reconciliation", products));
     }
 }

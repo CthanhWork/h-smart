@@ -6,6 +6,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 public record AccountLifecycleProperties(
         String frontendBaseUrl,
         long verificationTokenMinutes,
-        long passwordResetTokenMinutes
+        long passwordResetTokenMinutes,
+        long emailChangeTokenMinutes,
+        long refreshTokenMinutes
 ) {
 }

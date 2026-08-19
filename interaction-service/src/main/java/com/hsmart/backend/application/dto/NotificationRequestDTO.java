@@ -15,6 +15,8 @@ public class NotificationRequestDTO {
     @NotBlank
     private String userId;
 
+    private String title;
+
     @NotBlank
     private String type;
 
@@ -22,4 +24,7 @@ public class NotificationRequestDTO {
     private String message;
 
     private Long productId;
+    private Long orderId;
+    private Long offerId;
+    private String senderId;
 }

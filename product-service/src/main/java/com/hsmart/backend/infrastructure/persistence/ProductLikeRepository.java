@@ -2,6 +2,7 @@ package com.hsmart.backend.infrastructure.persistence;
 
 import com.hsmart.backend.domain.entities.ProductLike;
 import com.hsmart.backend.domain.entities.ProductStatus;
+import java.util.Collection;
 import java.util.Optional;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -13,9 +14,9 @@ public interface ProductLikeRepository extends JpaRepository<ProductLike, Long> 
     Optional<ProductLike> findByUserIdAndProductId(String userId, Long productId);
 
     @EntityGraph(attributePaths = {"product", "product.category"})
-    Page<ProductLike> findAllByUserIdAndProductIsDeletedFalseAndProductStatusNot(
+    Page<ProductLike> findAllByUserIdAndProductIsDeletedFalseAndProductStatusIn(
             String userId,
-            ProductStatus status,
+            Collection<ProductStatus> statuses,
             Pageable pageable
     );
 }

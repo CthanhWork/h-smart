@@ -181,8 +181,11 @@ class GhtkShippingClientTest {
                 userId,
                 userId,
                 "0901234567",
+                "79",
                 "Ho Chi Minh City",
+                "760",
                 district,
+                "26734",
                 "Ward 1",
                 "1 Example Street"
         );

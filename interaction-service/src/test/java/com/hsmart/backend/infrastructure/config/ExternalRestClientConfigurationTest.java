@@ -31,12 +31,19 @@ class ExternalRestClientConfigurationTest {
                             60_000,
                             10,
                             "assistant",
-                            "System prompt"
+                            "System prompt",
+                            0.3,
+                            400,
+                            0.3,
+                            0.7,
+                            200,
+                            "",
+                            false
                     )
             );
             context.registerBean(
                     IntentClassifierProperties.class,
-                    () -> new IntentClassifierProperties(1_000, 5_000)
+                    () -> new IntentClassifierProperties(1_000, 5_000, "")
             );
             context.registerBean(
                     PolicySearchProperties.class,
@@ -44,6 +51,8 @@ class ExternalRestClientConfigurationTest {
                             "http://elasticsearch-disabled:9200",
                             "hsmart-policy-index",
                             2,
+                            2,
+                            0.5,
                             1_000,
                             3_000
                     )

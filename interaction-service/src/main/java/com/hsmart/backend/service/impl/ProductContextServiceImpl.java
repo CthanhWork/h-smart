@@ -125,8 +125,6 @@ public class ProductContextServiceImpl implements ProductContextService {
                     .append(nullToFallback(product.categoryName(), "Chưa phân loại"))
                     .append(" - Mô tả ngắn: ")
                     .append(nullToFallback(product.description(), "Chưa có mô tả"))
-                    .append(" - Người bán: ")
-                    .append(nullToFallback(product.sellerId(), "Chưa rõ"))
                     .append(" - Khu vực: chưa có dữ liệu.");
         }
 

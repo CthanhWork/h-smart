@@ -132,6 +132,24 @@ services:
       retries: 5
       start_period: 10s
 
+  payment-postgres-db:
+    image: postgres:16-alpine
+    container_name: h-smart-payment-postgres-db
+    environment:
+      POSTGRES_DB: hsmart_payment_db
+      POSTGRES_USER: hsmart
+      POSTGRES_PASSWORD: hsmart_password
+    ports:
+      - "5437:5432"
+    volumes:
+      - payment-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U hsmart -d hsmart_payment_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
   interaction-mongo-db:
     image: mongo:7
     container_name: h-smart-interaction-mongo-db
@@ -260,7 +278,7 @@ services:
       SPRING_RABBITMQ_PORT: "5672"
       SPRING_RABBITMQ_USERNAME: hsmart
       SPRING_RABBITMQ_PASSWORD: hsmart_password
-      JWT_SECRET: UFdHZG1lU3Q2UTNYV2lBc1pDajFuWWtFaWpNd2pmd0h6aFZ4T3V0bE1YQU5SVEtrQ1VGVW9vV1h6S1J4bw==
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env or shell before starting Docker Compose}
       JWT_EXPIRATION_MS: "86400000"
       MAIL_ENABLED: ${MAIL_ENABLED:-false}
       MAIL_HOST: ${MAIL_HOST:-host.docker.internal}
@@ -271,6 +289,8 @@ services:
       MAIL_STARTTLS_ENABLE: ${MAIL_STARTTLS_ENABLE:-false}
       MAIL_FROM: ${MAIL_FROM:-no-reply@hsmart.local}
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:-http://localhost:5173}
+      APP_PUBLIC_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
+      STORAGE_UPLOAD_DIR: /app/uploads
       SPRING_PROFILES_ACTIVE: observability
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
@@ -287,6 +307,8 @@ services:
         condition: service_healthy
     ports:
       - "8081:8081"
+    volumes:
+      - ./user-service/uploads:/app/uploads
     healthcheck:
       test: ["CMD-SHELL", "curl -f -H \"X-Internal-Secret: $$INTERNAL_SHARED_SECRET\" http://localhost:8081/health || exit 1"]
       interval: 10s
@@ -379,9 +401,12 @@ services:
       ORDER_SERVICE_READ_TIMEOUT_MS: "3000"
       POLICY_SEARCH_BASE_URL: http://h-smart-elasticsearch:9200
       POLICY_SEARCH_INDEX_NAME: hsmart-policy-index
-      POLICY_SEARCH_PAGE_SIZE: "2"
+      POLICY_SEARCH_PAGE_SIZE: "5"
+      POLICY_SEARCH_MAX_CHUNKS: "3"
+      POLICY_SEARCH_MIN_SCORE: "0.5"
       POLICY_SEARCH_CONNECT_TIMEOUT_MS: "1000"
       POLICY_SEARCH_READ_TIMEOUT_MS: "3000"
+      STORAGE_UPLOAD_DIR: /app/uploads
       EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
       INTERNAL_SHARED_SECRET: ${INTERNAL_SHARED_SECRET:?Set INTERNAL_SHARED_SECRET in .env or shell before starting Docker Compose}
     depends_on:
@@ -397,6 +422,8 @@ services:
         condition: service_healthy
     ports:
       - "8083:8083"
+    volumes:
+      - ./interaction-service/uploads:/app/uploads
     healthcheck:
       test: ["CMD-SHELL", "curl -f -H \"X-Internal-Secret: $$INTERNAL_SHARED_SECRET\" http://localhost:8083/health || exit 1"]
       interval: 10s
@@ -463,6 +490,12 @@ services:
       INTERACTION_SERVICE_BASE_URL: http://interaction-service
       INTERACTION_SERVICE_CONNECT_TIMEOUT_MS: "2000"
       INTERACTION_SERVICE_READ_TIMEOUT_MS: "3000"
+      PAYMENT_SERVICE_BASE_URL: http://payment-service
+      PAYMENT_SERVICE_CONNECT_TIMEOUT_MS: "2000"
+      PAYMENT_SERVICE_READ_TIMEOUT_MS: "3000"
+      APP_PUBLIC_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
+      STORAGE_UPLOAD_DIR: /app/uploads
+      ORDER_RETURN_WINDOW_DAYS: "3"
       GHTK_API_URL: ${GHTK_API_URL:-https://services.giaohangtietkiem.vn}
       GHTK_API_TOKEN: ${GHTK_API_TOKEN:-}
       GHTK_CONNECT_TIMEOUT_MS: "2000"
@@ -499,10 +532,56 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    volumes:
+      - order-uploads:/app/uploads
     ports:
       - "8085:8085"
     healthcheck:
       test: ["CMD-SHELL", "curl -f -H \"X-Internal-Secret: $$INTERNAL_SHARED_SECRET\" http://localhost:8085/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  payment-service:
+    build:
+      context: ./payment-service
+      dockerfile: Dockerfile
+    container_name: h-smart-payment-service
+    mem_limit: 400m
+    environment:
+      SERVER_PORT: "8087"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://payment-postgres-db:5432/hsmart_payment_db
+      SPRING_DATASOURCE_USERNAME: hsmart
+      SPRING_DATASOURCE_PASSWORD: hsmart_password
+      ORDER_SERVICE_BASE_URL: http://order-service
+      ORDER_SERVICE_CONNECT_TIMEOUT_MS: "2000"
+      ORDER_SERVICE_READ_TIMEOUT_MS: "5000"
+      VNPAY_PAY_URL: ${VNPAY_PAY_URL:-https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
+      VNPAY_TMN_CODE: ${VNPAY_TMN_CODE:?Set VNPAY_TMN_CODE in .env or shell before starting Docker Compose}
+      VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET:?Set VNPAY_HASH_SECRET in .env or shell before starting Docker Compose}
+      VNPAY_RETURN_URL: ${VNPAY_RETURN_URL:-http://localhost:8000/api/v1/payments/vnpay/return}
+      VNPAY_RESULT_REDIRECT_URL: ${VNPAY_RESULT_REDIRECT_URL:-http://localhost:5173/payment-result}
+      VNPAY_EXPIRE_MINUTES: "15"
+      PAYMENT_PENDING_TIMEOUT_MINUTES: "30"
+      SPRING_PROFILES_ACTIVE: observability
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
+      MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
+      LOGGING_LOGSTASH_HOST: logstash
+      LOGGING_LOGSTASH_PORT: "5044"
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://discovery-server:8761/eureka/
+      INTERNAL_SHARED_SECRET: ${INTERNAL_SHARED_SECRET:?Set INTERNAL_SHARED_SECRET in .env or shell before starting Docker Compose}
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      payment-postgres-db:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+    ports:
+      - "8087:8087"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f -H \"X-Internal-Secret: $$INTERNAL_SHARED_SECRET\" http://localhost:8087/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -560,7 +639,7 @@ services:
       JAVA_OPTS: "-Dresilience4j.timelimiter.instances.assistantCircuitBreaker.timeoutDuration=60s -Dresilience4j.timelimiter.instances.assistantCircuitBreaker.cancelRunningFuture=false"
       SERVER_PORT: "8000"
       AI_SERVICE_URL: http://ai-service:8000
-      JWT_SECRET: UFdHZG1lU3Q2UTNYV2lBc1pDajFuWWtFaWpNd2pmd0h6aFZ4T3V0bE1YQU5SVEtrQ1VGVW9vV1h6S1J4bw==
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env or shell before starting Docker Compose}
       SPRING_PROFILES_ACTIVE: observability
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "1.0"
       MANAGEMENT_ZIPKIN_TRACING_ENDPOINT: http://zipkin:9411/api/v2/spans
@@ -590,6 +669,8 @@ services:
         condition: service_healthy
       order-service:
         condition: service_healthy
+      payment-service:
+        condition: service_healthy
       review-service:
         condition: service_healthy
       redis:
@@ -609,6 +690,8 @@ volumes:
   product-postgres-data:
   order-postgres-data:
   review-postgres-data:
+  payment-postgres-data:
+  order-uploads:
   interaction-mongo-data:
   rabbitmq-data:
   elasticsearch-data:

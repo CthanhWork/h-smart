@@ -41,6 +41,11 @@ order-service:
   connect-timeout-ms: ${ORDER_SERVICE_CONNECT_TIMEOUT_MS:2000}
   read-timeout-ms: ${ORDER_SERVICE_READ_TIMEOUT_MS:3000}
 
+payment-service:
+  base-url: ${PAYMENT_SERVICE_BASE_URL:http://payment-service}
+  connect-timeout-ms: ${PAYMENT_SERVICE_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${PAYMENT_SERVICE_READ_TIMEOUT_MS:3000}
+
 internal:
   security:
     enabled: ${INTERNAL_SECURITY_ENABLED:true}

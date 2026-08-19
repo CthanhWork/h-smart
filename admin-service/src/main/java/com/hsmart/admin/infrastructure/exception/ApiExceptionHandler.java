@@ -2,6 +2,7 @@ package com.hsmart.admin.infrastructure.exception;
 
 import com.hsmart.admin.application.dto.ApiResponse;
 import com.hsmart.admin.application.exceptions.MarketplaceStatsUnavailableException;
+import com.hsmart.admin.application.exceptions.DuplicatePendingReportException;
 import com.hsmart.admin.application.exceptions.MissingUserContextException;
 import com.hsmart.admin.application.exceptions.ProductModerationException;
 import com.hsmart.admin.application.exceptions.ReportAlreadyProcessedException;
@@ -69,6 +70,12 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(ReportAlreadyProcessedException.class)
     public ResponseEntity<ApiResponse<Void>> handleReportAlreadyProcessed(ReportAlreadyProcessedException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ApiResponse.error(HttpStatus.CONFLICT, exception.getMessage()));
+    }
+
+    @ExceptionHandler(DuplicatePendingReportException.class)
+    public ResponseEntity<ApiResponse<Void>> handleDuplicatePendingReport(DuplicatePendingReportException exception) {
         return ResponseEntity.status(HttpStatus.CONFLICT)
                 .body(ApiResponse.error(HttpStatus.CONFLICT, exception.getMessage()));
     }

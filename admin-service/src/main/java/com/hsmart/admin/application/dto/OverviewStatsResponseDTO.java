@@ -14,4 +14,6 @@ public class OverviewStatsResponseDTO {
     private long totalUsers;
     private long totalSellingProducts;
     private BigDecimal totalCompletedRevenue;
+    /** Total platform fee revenue collected into the system account. */
+    private BigDecimal platformFeeRevenue;
 }

@@ -1,3 +1,281 @@
+[2026-06-24] Đổi/trả hàng MVP + cọc trừ vào đơn (bỏ thu ship 2 lần) + ảnh minh chứng khi giao
+
+- Services: `order-service` (chính), `admin-service`, `api-gateway`.
+- Bối cảnh: sau khi thêm cọc VNPay, COD vẫn thu cả phí ship (`order.getAmount()`) → ship bị thu 2 lần. Đồng thời cần luồng trả hàng có bằng chứng.
+
+Thay đổi:
+1. **Dòng tiền**: `confirmOrder` đặt COD = `productAmount` (tiền hàng), bỏ ship khỏi COD (ship đã trả qua cọc). Test `confirmOrderShouldCreateGhtkShipment...` cập nhật codAmount 130000→100000.
+2. **Ảnh minh chứng**: `POST /api/v1/orders/{id}/confirm` đổi sang **multipart, bắt buộc ≥1 ảnh**; order-service nay có lưu file (StorageProperties/ApplicationProperties/WebConfig mirror product-service), serve tại `GET /api/v1/orders/media/{file}`; ảnh lưu json `evidence_images` trên `orders`. Env mới: `STORAGE_UPLOAD_DIR`, `APP_PUBLIC_BASE_URL`; volume `order-uploads:/app/uploads`.
+3. **Trả hàng (MVP, dual-approval)**: thêm `OrderStatus.RETURN_REQUESTED`, `RETURNED`; cột `completed_at`, `return_reason`, `return_requested_at`, `return_seller_approved`, `return_admin_approved`, `return_reject_reason`. Cửa sổ `ORDER_RETURN_WINDOW_DAYS` (mặc định 3) tính từ `completed_at`.
+   - Endpoint: buyer `POST /orders/{id}/return-request {reason}`; seller `POST /orders/{id}/return-approve` & `/return-reject`; admin `POST /orders/internal/admin/{id}/return-approve` & `/return-reject` (qua admin-service `POST /api/v1/admin/orders/{id}/return-approve|return-reject`).
+   - Cần **CẢ seller + admin** duyệt mới `RETURNED`; bất kỳ bên nào từ chối → quay lại `COMPLETED` (lưu lý do). Khi `RETURNED`: cọc đánh dấu `REFUNDED` (paymentClient.refundDeposit), **sản phẩm giữ nguyên SOLD** (người bán tự đăng lại), tiền hàng COD hoàn thủ công.
+4. admin-service: `OrderAdminClient`/`OrderServiceAdminClient` + service + controller thêm approve/reject return (gọi order-service internal). api-gateway: public path `/api/v1/orders/media/**`.
+
+Chưa làm: VNPay refund thật, vận đơn ngược, hoàn COD tự động, ảnh phía buyer (optional), notification cho return (chỉ log).
+
+Files: order-service — `domain/entities/{OrderStatus,Order}`, `application/dto/{OrderResponseDTO,ReturnActionRequestDTO}`, `infrastructure/config/{StorageProperties,ApplicationProperties,WebConfig}`, `service/{OrderService}` + `service/impl/OrderServiceImpl`, `presentation/controllers/OrderController`, `application.yml`, test `OrderServiceImplTest`; admin-service — `service/OrderAdminClient` + `infrastructure/order/OrderServiceAdminClient` + `service/AdminManagementService(+Impl)` + `presentation/controllers/AdminManagementController`; api-gateway — `AuthenticationFilter`; `docker-compose.yml` + `docker-compose-gcp.yml` (order-uploads volume + env).
+
+Kiểm chứng: `mvn order-service test` 47 pass; `mvn admin-service test` 16 pass; gateway compile OK; cả 2 compose config OK. Deploy VPS thành công (order/admin/gateway rebuilt, healthy). Smoke prod: `return-request` trên đơn PENDING → 400 "Only completed orders can be returned" (đúng); `/orders/media/**` public (tới order-service).
+
+Lưu ý còn lại: (a) E2E `RETURNED` đầy đủ cần token seller + admin (mới có buyer); (b) `NoResourceFoundException` trả 500 thay vì 404 cho media thiếu — cosmetic, nên thêm handler.
+
+---
+
+[2026-06-24] Thanh toán cọc VNPay (sandbox) bắt buộc trước khi đặt hàng — payment-service mới
+
+- Service mới: `payment-service` — DB `hsmart_payment_db` (postgres, host port 5437), app port 8087.
+- Services đổi: `order-service` (`hsmart_order_db`), `api-gateway`.
+- Yêu cầu: người mua phải thanh toán cọc = phí vận chuyển qua VNPay test trước khi đơn được tạo.
+- Quyết định: tạo payment intent trước (chưa tạo Order); chốt qua IPN (chính) + Return (dự phòng); service riêng; hoàn/trừ cọc chỉ đánh dấu trạng thái.
+
+Luồng: FE → `POST /api/v1/payments/deposit` → payment-service lấy phí ship từ order-service làm tiền cọc → tạo `DepositPayment(PENDING)` + dựng VNPay URL (HMAC-SHA512) → người mua trả tiền → VNPay gọi IPN + Return → payment-service verify SecureHash + đối chiếu amount (idempotent) → PAID → gọi order-service tạo Order(PENDING) → lưu orderId. Hủy đơn → refund (PAID→REFUNDED); hoàn tất đơn → settle (PAID→SETTLED), best-effort.
+
+payment-service (mới): entity `DepositPayment` + enum `PaymentStatus` (PENDING/PAID/FAILED/EXPIRED/REFUNDED/SETTLED); `VnpayService` (ký + verify HMAC-SHA512 theo spec 2.1.0); `OrderServiceClient` (gọi `/shipping-estimate` + `/internal/from-deposit` kèm X-Internal-Secret + X-User-Id); `PaymentController` (`/deposit`, `GET /{id}`, `/vnpay/return` redirect, `/vnpay/ipn` trả {RspCode,Message}, `/internal/{orderId}/settle|refund`); `InternalSecurityFilter` (copy); scheduled expire cọc PENDING quá hạn.
+
+order-service:
+- **Gỡ** `POST /api/v1/orders` (public, tạo đơn trực tiếp) → **thêm** `POST /api/v1/orders/internal/from-deposit` (reuse `createOrder`). Buyer không tạo đơn trực tiếp được nữa.
+- Thêm `PaymentClient` + `PaymentServiceClient` (best-effort, X-Internal-Secret); hook `settleDeposit` khi complete, `refundDeposit` khi cancel/admin-cancel/hết hạn (qua publishAfterCommit).
+- `application.yml`: block `payment-service`. Tests cập nhật (mock PaymentClient; OrderControllerTest đổi path tạo đơn).
+
+api-gateway: route `payment-route` (`lb://payment-service`, `/api/v1/payments/**`); `AuthenticationFilter` thêm public `/api/v1/payments/vnpay/return` + `/vnpay/ipn` (VNPay gọi không kèm JWT; gateway vẫn tự inject X-Internal-Secret cho lb route).
+
+Inter-service: payment-service → order-service (lấy phí ship + tạo đơn); order-service → payment-service (settle/refund). Cả hai dùng X-Internal-Secret; gateway chặn `/internal/` từ ngoài.
+
+Env mới (payment-service): `VNPAY_TMN_CODE`, `VNPAY_HASH_SECRET` (bắt buộc), `VNPAY_PAY_URL`, `VNPAY_RETURN_URL`, `VNPAY_RESULT_REDIRECT_URL`, `VNPAY_EXPIRE_MINUTES`, `PAYMENT_PENDING_TIMEOUT_MINUTES`, `ORDER_SERVICE_BASE_URL`, `INTERNAL_SHARED_SECRET`. order-service: `PAYMENT_SERVICE_BASE_URL`.
+
+Hạ tầng: `docker-compose.yml` thêm `payment-postgres-db` (5437) + `payment-service` (8087) + volume `payment-postgres-data` + gateway depends_on + order-service env. **Chưa** cập nhật `docker-compose-gcp.yml` (cấu trúc URL khác — xem mục 6 docs).
+
+Tài liệu chi tiết + hợp đồng API + việc FE còn lại: `docs/DEPOSIT-PAYMENT-VNPAY.md`.
+
+Kiểm chứng: `mvn -f payment-service/pom.xml test` → 8 pass (gồm round-trip ký/verify VNPay); `mvn -f order-service/pom.xml test` → 44 pass; `mvn -f api-gateway/pom.xml compile` → OK; `docker compose config -q` (với env giả) → COMPOSE_OK.
+
+---
+
+[2026-06-24] Seller cấu hình thương lượng giá — thay trần giảm 30% cứng bằng giá sàn (minPrice) do người bán đặt
+
+- Services: `product-service` (`hsmart_product_db`), `order-service` (`hsmart_order_db`)
+- Bối cảnh: trước đây người bán chỉ đặt 1 giá; người mua "trả giá" bằng cách chọn % giảm (1–30%) và hệ thống tự tính giá, trần 30% là hằng số cứng trong order-service. Yêu cầu: cho người bán bật/tắt thương lượng và đặt giá sàn chấp nhận, thay cho trần 30% cứng.
+
+Quyết định thiết kế:
+- Người mua vẫn gửi `discountPercent` (giữ hợp đồng API); bỏ trần 30% cứng, thay bằng kiểm tra giá tính ra ≥ `minPrice`.
+- `negotiable=true` ⇒ `minPrice` bắt buộc (validate 400); `negotiable=false` ⇒ bỏ qua minPrice và không cho trả giá.
+- `negotiable` mặc định `false` (opt-in) — sản phẩm cũ migrate sang không cho trả giá tới khi seller bật.
+- Phạm vi: chỉ backend. FE (`../H-smart UI`: form đăng/sửa + modal Trả giá) làm sau.
+
+product-service:
+- `Product`: thêm cột `negotiable` (boolean, not null default false) và `min_price` (numeric(12,2), nullable). ddl-auto=update tự thêm cột (không cần migration script).
+- `ProductRequestDTO`: thêm `negotiable`, `minPrice` (`@DecimalMin(0.0, inclusive=false)`); `ProductResponseDTO`: thêm `negotiable`, `minPrice`.
+- `ProductMapper.toEntity`: thêm 2 tham số `negotiable`, `minPrice`.
+- `ProductServiceImpl`: thêm `validateNegotiation()` (negotiable⇒minPrice bắt buộc, >0, < giá niêm yết) + `resolveMinPrice()` (null khi không negotiable); gọi trong `createProduct`/`updateProduct`. Controller `@ModelAttribute` tự bind field mới (không đổi).
+
+order-service:
+- `ProductResponseDTO` (record nhận JSON từ product-service): thêm `negotiable`, `minPrice`.
+- `OrderServiceImpl.createOffer`: bỏ trần `MAX_OFFER_DISCOUNT_PERCENT=30`; thêm chặn khi `!negotiable` ("This product is not open to offers") và khi giá tính ra < `minPrice` ("Offer price is below the seller's minimum acceptable price"). Cả hai là `OrderStateException` → 400.
+- `CreateOfferRequestDTO`: nới `@Max(30)` → `@Max(99)` (giá sàn mới là ràng buộc thực; <100 để giá > 0).
+
+Inter-service: không đổi endpoint/contract; product-service `GET /api/v1/products/{id}` nay trả thêm `negotiable`/`minPrice`, order-service đọc thêm 2 field này khi tạo offer.
+
+Files: product-service — `domain/entities/Product.java`, `application/dto/ProductRequestDTO.java`, `application/dto/ProductResponseDTO.java`, `application/mapper/ProductMapper.java`, `service/impl/ProductServiceImpl.java`, test `ProductServiceImplTest`; order-service — `application/dto/ProductResponseDTO.java`, `application/dto/CreateOfferRequestDTO.java`, `service/impl/OrderServiceImpl.java`, test `OrderServiceImplTest`.
+
+Kiểm chứng: `mvn -f product-service/pom.xml test` → 33 pass; `mvn -f order-service/pom.xml test` → 44 pass; cả hai BUILD SUCCESS.
+
+---
+
+[2026-06-21] product-service AI naming — bỏ auto-gán tên khi CV không nhận diện + title tự nhiên
+
+- Service: `product-service`
+- Database: `hsmart_product_db`
+- Bối cảnh: khi ai-service không nhận diện được vật thể, nó trả sentinel (`label="unknown"`, `translated_label="Không xác định"`, `num_detections=0`). Pipeline cũ coi đó là tên hợp lệ và ghép thành title cứng "Không xác định ... phù hợp dùng trong gia đình". Yêu cầu: không auto-gán tên, văn phong tự nhiên hơn.
+
+Thay đổi:
+- `ProductNamingSupport`: thêm `isUnrecognized(PredictResponseDTO)` (phát hiện sentinel/empty detections); `resolveTitle` ưu tiên `translated_label` của detection rồi mới fallback map, và trả "" thay vì "Unknown product"; `resolveSuggestedName` trả "" cho label rỗng/unknown. Map `LABEL_TRANSLATIONS` viết lại khớp **20 lớp** của model hiện tại (yolo_detector.py) + có dấu tiếng Việt (thay map LVIS cũ lệch nhãn, không dấu).
+- `DetectionDTO`: thêm field `translatedLabel` (deser `translated_label`) để dùng trực tiếp tên tiếng Việt từ ai-service, hết phụ thuộc map phía Java.
+- `ProductImageAnalysisServiceImpl`: nếu `isUnrecognized` → trả gợi ý rỗng (suggestedName="", price=null) thay vì sentinel.
+- `ProductListingSuggestionServiceImpl`: gợi ý title phân tầng theo confidence — ≥ `product.naming.confident-threshold` (mặc định 0.6) → title tự nhiên chọn từ 4 mẫu (deterministic theo tên, tên đứng đầu câu); 0.4–ngưỡng → chỉ tên trần; không nhận diện → "". Bỏ template cứng + bỏ lặp category.
+- `ProductServiceImpl.createProduct`: tách `resolveCreateTitle()` — title người dùng nhập → giữ; AI down → fallback `Uncategorized Product` (giữ chế độ degraded); AI chạy nhưng không nhận diện + title trống → **400** "Không nhận diện được sản phẩm trong ảnh. Vui lòng nhập tên sản phẩm." (không còn auto-gán "Unknown product").
+
+Env mới: `AI_NAMING_CONFIDENT_THRESHOLD` (mặc định 0.6).
+
+Files: `application/mapper/ProductNamingSupport.java`, `application/dto/DetectionDTO.java`, `service/impl/ProductImageAnalysisServiceImpl.java`, `service/impl/ProductListingSuggestionServiceImpl.java`, `service/impl/ProductServiceImpl.java`, `src/main/resources/application.yml`; tests: `ProductNamingSupportTest`, `ProductImageAnalysisServiceImplTest`, `ProductListingSuggestionServiceImplTest` (mới), `ProductServiceImplTest`.
+
+Kiểm chứng: `mvn -f product-service/pom.xml test` → 33 tests pass, BUILD SUCCESS.
+
+Lưu ý: ai-service không đổi (mục "thêm field recognized" bỏ qua vì phía Java đã phát hiện sentinel chắc chắn qua label/detections).
+
+---
+
+[2026-06-21] interaction-service (assistant) fixes — 7 issues
+
+- Service: `interaction-service`
+- Database: MongoDB `hsmart_interaction_db`
+
+Issues fixed:
+- (Critical latent) `InternalSecurityFilter`: added `shouldNotFilter()` — only paths containing `/internal/` require `X-Internal-Secret`; all user-facing `/api/v1/assistant/**` paths now pass through correctly. Guards against production breakage when `INTERNAL_SECURITY_ENABLED=true` with a configured secret.
+- (High #2) Input length validation: `AssistantChatRequestDTO.message` and `GET /chat/stream?message` now enforce `@Size(max=2000)`. Controller annotated `@Validated`; new `ConstraintViolationException` handler added to `ApiExceptionHandler` (400).
+- (High #3) Privacy: removed `sellerId` from LLM prompt in `ProductContextServiceImpl.formatProducts()` — user IDs no longer sent to external LLM provider.
+- (Medium #4) Dedicated streaming executor: `AssistantConfig` provides a `ThreadPoolTaskExecutor` bean `streamingExecutor` (core=4, max=20, prefix=`assistant-stream-`). `AssistantServiceImpl.streamChat()` now uses it instead of the default ForkJoinPool.
+- (Medium #5) Token usage logging: `CloudAssistantClient.ChatCompletionResponse` now captures `usage` (prompt/completion/total tokens) and logs them at INFO level after each non-streaming reply.
+- (Medium #6) Chat history cleanup: `@EnableScheduling` added to `InteractionServiceApplication`; `AssistantServiceImpl.cleanupOldAssistantHistory()` runs daily at 03:00 (configurable via `ASSISTANT_HISTORY_CLEANUP_CRON`) and deletes assistant messages older than 90 days (configurable via `ASSISTANT_HISTORY_RETENTION_DAYS`). New `deleteOldAssistantMessages` query added to `ChatMessageRepository`.
+- (Medium #7) `applyRealtimeUnavailableNotice`: replaced fragile `contains("không thể truy cập dữ liệu thời gian thực")` check with precise `startsWith(REALTIME_UNAVAILABLE_NOTICE)` to prevent double-prefixing.
+
+New env vars: `ASSISTANT_HISTORY_RETENTION_DAYS` (default 90), `ASSISTANT_HISTORY_CLEANUP_CRON` (default `0 0 3 * * *`).
+Tests: 33 pass (unchanged count — no new test needed since streamChat path is not unit-tested).
+
+---
+
+[2026-06-21] review-service fixes (8 issues: InternalSecurityFilter, race condition, pagination, event dedup, privacy, updatedAt, productId)
+
+- Service: `review-service`
+- Database: `hsmart_review_db`
+
+Issues fixed:
+- (Critical #1) `InternalSecurityFilter`: added `shouldNotFilter()` — only paths starting with `/api/v1/reviews/internal/` require `X-Internal-Secret`; `POST /api/v1/reviews` (buyer) and `GET /api/v1/reviews/sellers/**` (public) now pass through correctly. Root cause: gateway `AuthenticationFilter` only injects `X-User-Id`/`X-User-Role`, not `X-Internal-Secret` — all buyer/public traffic was blocked with 401.
+- (Critical #2) `ApiExceptionHandler`: added `@ExceptionHandler(DataIntegrityViolationException.class)` mapped to 409 Conflict — concurrent duplicate review submissions no longer return 500.
+- (Medium #3) `getSellerReviews` paginated: `ReviewRepository.findAllBySellerIdAndHiddenFalseOrderByCreatedAtDesc` now takes `Pageable`; service returns `PageResponseDTO<PublicReviewResponseDTO>`; controller `GET /api/v1/reviews/sellers/{sellerId}` accepts standard `page`/`size`/`sort` (default: `createdAt DESC`) — **breaking change for frontend**.
+- (Medium #4) `ReviewCreatedEvent`: added `reviewId` field — user-service consumer can now deduplicate RabbitMQ retries.
+- (Medium #5) `PublicReviewResponseDTO` created: excludes `buyerId` and `hidden`; used for public seller-reviews endpoint. Admin endpoint (`listAllReviewsForAdmin`) keeps full `ReviewResponseDTO`.
+- (Medium #6) `Review` entity: added `updated_at` column (`@PreUpdate`), default-set in `@PrePersist`. `ReviewResponseDTO` updated to include `updatedAt`.
+- (Low #7) `Review` entity: added `product_id` column (nullable). Populated from `order.productId()` in `createReview`. Included in both `ReviewResponseDTO` and `PublicReviewResponseDTO`.
+- (Low #8) `PublicReviewResponseDTO` omits `hidden` field — redundant in public endpoint where all results are non-hidden by definition.
+
+New files:
+  - `application/dto/PublicReviewResponseDTO.java`
+  - `src/test/java/.../ReviewServiceImplTest.java` (9 tests, first test suite for review-service)
+
+Files changed:
+  - `infrastructure/security/InternalSecurityFilter.java`
+  - `infrastructure/exception/ApiExceptionHandler.java`
+  - `domain/entities/Review.java`
+  - `application/dto/ReviewResponseDTO.java`
+  - `application/dto/ReviewCreatedEvent.java`
+  - `infrastructure/persistence/ReviewRepository.java`
+  - `service/ReviewService.java`
+  - `service/impl/ReviewServiceImpl.java`
+  - `presentation/controllers/ReviewController.java`
+
+Verification: `review-service`: 9 tests passed (first test suite created from scratch)
+
+---
+
+[2026-06-21] order-service / offer-flow fixes (9 issues: webhook auth, status, pagination, notifications, rate-limit)
+
+- Service: `order-service`
+- Database: `hsmart_order_db`
+- Plan saved: `docs/ORDER-SERVICE-FIX-PLAN.md`
+
+Issues fixed:
+- (Critical #1) `InternalSecurityFilter`: added `shouldNotFilter()` override that exempts `/api/v1/orders/internal/ghtk-webhook` — GHTK is an external caller that cannot provide `X-Internal-Secret`; the GHTK-specific hash in `validateWebhook()` already authenticates the call
+- (Critical #2) `OrderServiceImpl.isOrderableStatus`: added `|| "ACTIVE".equalsIgnoreCase(status)` so legacy products seeded before the moderation flow (June 2026) remain orderable
+- (Medium #3) `CreateOfferRequestDTO`: `@Max(50)` changed to `@Max(30)` to match `MAX_OFFER_DISCOUNT_PERCENT = 30` in the service; buyers can no longer submit 31-50% offers that DTO validation would pass but service would reject
+- (Medium #4) Pagination for user order/offer lists: `OrderRepository` and `ProductOfferRepository` gained a `Pageable` overload; `OrderService.getOrdersForCurrentUser` and `getOffersForCurrentUser` now return `PageResponseDTO<>`; `OrderController GET /api/v1/orders` and `GET /api/v1/orders/offers` now accept standard page/size/sort params (default: `createdAt DESC`) — **breaking change for frontend**
+- (Medium #5) Scheduled expiry notifications: `cancelExpiredPendingOrders` changed from bulk JPQL update to load (`findPendingOrdersExpiredBefore`) → `saveAll` → `publishAfterCommit` per entity; `expirePendingOffers` same pattern with `findPendingExpiredOffers`; new `NotificationClient` methods `sendOrderCancelledNotification` and `sendOfferExpiredNotification` implemented in `InteractionNotificationClient` (types: `ORDER_CANCELLED`, `ORDER_CANCELLED_SELLER`, `PRODUCT_OFFER_EXPIRED`)
+- (Medium #6) `adminCancelOrder`: added `publishAfterCommit(() -> notificationClient.sendOrderCancelledNotification(...))` — admin cancellations now notify both buyer and seller
+- (Low #7) `productTitle` added to `Order` entity (`product_title VARCHAR(255) NULL`), populated in `createOrder` from `product.title()`, mapped in `toResponse()` and `OrderResponseDTO`
+- (Low #8) `cancelOrder`: sellers may now cancel `PROCESSING` orders (tracking code logged as warning; carrier shipment must be cancelled manually in the GHTK/Viettel dashboard); buyers remain PENDING-only
+- (Low #9) Offer re-submit rate limit: `ProductOfferRepository.existsByProductIdAndBuyerIdAndCreatedAtAfter` added; `createOffer` rejects re-submission within `offers.resubmit-cooldown-hours` (default 1, env `OFFERS_RESUBMIT_COOLDOWN_HOURS`); `application.yml` extended with `offers.*` block
+
+New env vars:
+  - `OFFERS_EXPIRATION_SCAN_MS` (default 300000)
+  - `OFFERS_RESUBMIT_COOLDOWN_HOURS` (default 1)
+
+Files changed:
+  - `infrastructure/security/InternalSecurityFilter.java`
+  - `service/impl/OrderServiceImpl.java`
+  - `service/OrderService.java`
+  - `service/NotificationClient.java`
+  - `infrastructure/interaction/InteractionNotificationClient.java`
+  - `infrastructure/persistence/OrderRepository.java`
+  - `infrastructure/persistence/ProductOfferRepository.java`
+  - `domain/entities/Order.java`
+  - `application/dto/OrderResponseDTO.java`
+  - `application/dto/CreateOfferRequestDTO.java`
+  - `presentation/controllers/OrderController.java`
+  - `src/main/resources/application.yml`
+  - `src/test/java/.../OrderServiceImplTest.java`
+
+Verification: `order-service`: 42 tests passed (41 existing updated + 1 new)
+
+---
+
+[2026-06-21] product-service weakness fixes (public status filter, seller my-products, image update, HIDDEN toggle, orphan cleanup, createdAt, stats)
+
+- Service: `product-service`
+- Database: `hsmart_product_db`
+- Issues fixed:
+  - (Critical) Public `GET /api/v1/products` now defaults to APPROVED+ACTIVE statuses when no `status` param is provided; PENDING_REVIEW, HIDDEN, SOLD listings no longer leak into the public catalog
+  - (Critical) Public `GET /api/v1/products/{id}` and wishlist toggle (`POST /{id}/like`) now use `getPublicProduct` which returns 404 for PENDING_REVIEW/HIDDEN/SOLD products
+  - (Critical) New `GET /api/v1/products/mine` endpoint returns all non-deleted products owned by the current seller regardless of status, so sellers can manage their PENDING_REVIEW/HIDDEN listings
+  - (Critical) `PUT /api/v1/products/{id}` now accepts optional `files`/`file` multipart fields; when provided, old physical image files are deleted and new ones stored in their place
+  - (Medium) `validateUpdateStatus` (separate from create validation) allows sellers to set `HIDDEN` status during update; all other non-null status values are still rejected with 400
+  - (Medium) `deleteProduct` now calls `deleteStoredImageFiles` to remove physical files from `uploads/` after soft-delete; logs a warning if a file cannot be deleted
+  - (Medium) `Product` entity now has `@CreationTimestamp createdAt` column; `ProductResponseDTO` exposes it via mapper
+  - (Minor) Wishlist (`GET /wishlist`) now uses `findAllByUserIdAndProductIsDeletedFalseAndProductStatusIn` with PUBLIC_VISIBLE_STATUSES; HIDDEN and PENDING_REVIEW items no longer appear
+  - (Minor) `getProductStats` returns a status breakdown: `totalSellingProducts`, `totalPendingReview`, `totalHidden`, `totalSold`
+- Note on race condition: `ProductLike` already had a unique constraint `(user_id, product_id)` — no change needed there
+- New endpoints:
+  - `GET /api/v1/products/mine` — seller's own product list (all non-deleted statuses)
+- Changed endpoints:
+  - `GET /api/v1/products` — now filters to APPROVED+ACTIVE by default when no status param is given
+  - `GET /api/v1/products/{id}` — now returns 404 for non-public statuses
+  - `PUT /api/v1/products/{id}` — now accepts optional multipart image files; consumes multipart or form-urlencoded
+  - `GET /api/v1/products/internal/stats` — now returns breakdown by status
+- Files changed:
+  - `domain/entities/Product.java` — added `createdAt`
+  - `application/dto/ProductResponseDTO.java` — added `createdAt`
+  - `application/dto/ProductStatsResponseDTO.java` — added breakdown fields
+  - `application/mapper/ProductMapper.java` — mapped `createdAt`
+  - `infrastructure/persistence/ProductRepository.java` — added `findAllBySellerIdAndIsDeletedFalse`
+  - `infrastructure/persistence/ProductLikeRepository.java` — changed wishlist query to `StatusIn`
+  - `service/ProductService.java` — added `getMyProducts`; changed `updateProduct` signature
+  - `service/impl/ProductServiceImpl.java` — all fixes above
+  - `presentation/controllers/ProductController.java` — added `/mine` endpoint; updated `PUT /{id}` to accept files
+  - `src/test/…/ProductServiceImplTest.java` — updated test calls and added `updateProductShouldAllowSellerToHideListing`
+- Verification:
+  - `mvn test` passed in `product-service` (24 tests, 0 failures)
+
+[2026-06-20] user-service authenticated account management expanded
+
+- Service: `user-service`
+- New endpoints:
+  - `PUT /api/v1/users/password`
+  - `PUT /api/v1/users/avatar`
+  - `POST /api/v1/users/email/change`
+  - `POST /api/v1/users/email/confirm`
+  - `POST /api/v1/auth/refresh`
+  - `POST /api/v1/auth/logout`
+- Auth contract changes:
+  - `POST /api/v1/auth/login` now returns both:
+    - `accessToken`
+    - `refreshToken`
+  - `tokenType` remains `Bearer`
+- Account token changes:
+  - `account_tokens` now supports:
+    - `EMAIL_CHANGE`
+    - `REFRESH_TOKEN`
+  - `account_tokens.target_email` added to stage email-change confirmation
+- Behavior added:
+  - avatar updates are now handled through a dedicated authenticated endpoint instead of piggybacking on profile update
+  - `PUT /api/v1/users/avatar` now accepts `multipart/form-data` and stores avatar files on the server filesystem
+  - uploaded avatars are served from `GET /api/v1/users/media/{filename}`
+  - authenticated users can change password by submitting current password and new password
+  - password change and password reset now revoke stored refresh tokens
+  - authenticated users can request email change, receive OTP at the new email, and confirm the change
+  - refresh token rotation is supported through `POST /api/v1/auth/refresh`
+  - logout revokes stored refresh tokens through `POST /api/v1/auth/logout`
+- Email delivery:
+  - account mail templates were refreshed and now include email-change confirmation messages
+- Configuration changes:
+  - `account.lifecycle.email-change-token-minutes`
+  - `account.lifecycle.refresh-token-minutes`
+  - `storage.upload-dir`
+  - `app.public-base-url`
+- Verification:
+  - `mvn -q test` passed in `user-service`
+- Technical note:
+  - logout currently invalidates refresh-token based session continuation
+  - access tokens are still stateless JWTs validated at `api-gateway`, so immediate access-token revocation is not yet enforced gateway-wide
+  - `api-gateway` now treats `/api/v1/users/media/**` as a public path so avatars can be rendered without JWT
+
 [2026-04-08] user-service initialized
 
 - Service: `user-service`
@@ -2429,3 +2707,287 @@
 - Updated the Interaction Service product description prompt to return a complete Vietnamese sales paragraph that can be published immediately.
 - Removed prompt instructions that asked sellers to verify or supplement missing specifications.
 - Added server-side output validation that replaces editorial or incomplete AI responses with a safe, publish-ready fallback without inventing technical details.
+
+[2026-06-20] Admin operational gaps filled: unban, user management, order management, review moderation
+
+- Scope:
+  - Filled four critical admin operational gaps across admin-service, user-service, order-service, and review-service
+  - No gateway routing changes required (all new admin endpoints fall under existing `/api/v1/admin/**` route)
+
+- Unban user (quick win):
+  - Added `POST /api/v1/admin/users/{userId}/unban` to `admin-service`
+  - Reuses existing `PUT /api/v1/users/internal/{userId}/status` with `isActive: true`
+  - Symmetric to the existing ban endpoint; admin can now restore access without needing to call the internal endpoint directly
+
+- User management:
+  - Added `GET /api/v1/users/internal/admin/list?search=&isActive=&page=&size=` to `user-service`
+  - Added `GET /api/v1/users/internal/admin/{userId}` to `user-service`
+  - Added JPQL query `findAllForAdmin` to `UserRepository` with optional search (username/email LIKE) and isActive filter
+  - Added `UserAdminSummaryDTO` to `user-service` (id, username, email, fullName, phoneNumber, role, active, emailVerified, trustScore, reviewCount, province, district)
+  - Added `PageResponseDTO` to `user-service`
+  - `admin-service` exposes `GET /api/v1/admin/users` and `GET /api/v1/admin/users/{userId}` by delegating to user-service internal endpoints
+  - Added `listUsers` and `getUserById` to `UserAdminClient` and `UserServiceAdminClient`
+  - Added `UserAdminSummaryDTO` and `PageResponseDTO` to `admin-service`
+
+- Order management:
+  - Added `GET /api/v1/orders/internal/admin/list?status=&page=&size=` to `order-service`
+  - Added `POST /api/v1/orders/internal/admin/{orderId}/cancel` to `order-service` (bypasses buyer/seller ownership check)
+  - Admin cancel rejects already COMPLETED or CANCELLED orders
+  - Added JPQL `findAllForAdmin` to `OrderRepository` with optional status filter, sorted by `createdAt DESC`
+  - Added `PageResponseDTO` to `order-service`
+  - `admin-service` exposes `GET /api/v1/admin/orders` and `POST /api/v1/admin/orders/{orderId}/cancel`
+  - Added `OrderAdminClient`, `OrderServiceAdminClient`, and `OrderResponseDTO` to `admin-service`
+  - Added `reviewServiceRestClient` to `DownstreamClientConfig`
+
+- Review moderation:
+  - Added `hidden` boolean field (column `is_hidden`, default `false`) to `Review` entity in `review-service`
+  - Updated `getSellerReviews` to exclude hidden reviews (renamed repository method to `findAllBySellerIdAndHiddenFalseOrderByCreatedAtDesc`)
+  - Added `GET /api/v1/reviews/internal/admin/list` (paginated, all reviews including hidden)
+  - Added `POST /api/v1/reviews/internal/{reviewId}/hide`
+  - Added `POST /api/v1/reviews/internal/{reviewId}/restore`
+  - Added `ReviewNotFoundException` mapped to `404 Not Found`
+  - Added `PageResponseDTO` to `review-service`
+  - `admin-service` exposes `GET /api/v1/admin/reviews`, `POST /api/v1/admin/reviews/{reviewId}/hide`, `POST /api/v1/admin/reviews/{reviewId}/restore`
+  - Added `ReviewAdminClient`, `ReviewServiceAdminClient`, and `ReviewAdminSummaryDTO` to `admin-service`
+
+- Verification:
+  - `user-service`: 28 tests passed (26 existing + 2 new)
+  - `order-service`: 41 tests passed
+  - `review-service`: BUILD SUCCESS
+  - `admin-service`: 13 tests passed (12 existing + 1 new unban test)
+
+---
+
+[2026-06-20] interaction-service — nâng cấp LLM GĐ1→GĐ4 (branch: llm-upgrade)
+
+- Service: `interaction-service`
+- Database: `hsmart_interaction_db` (MongoDB, không thay đổi schema)
+
+**GĐ1 — Tham số sinh**
+- `CloudAssistantClient.ChatCompletionRequest`: thêm `temperature`, `max_tokens`, `frequency_penalty` với `@JsonInclude(NON_NULL)`
+- Hai preset: chat (temp=0.3, max=400, freq_pen=0.3), product-description (temp=0.7, max=200)
+- `AssistantModelClient` thêm `generateDescriptionReply()` default; `AssistantServiceImpl` dùng preset riêng cho sinh mô tả
+- Env mới: `ASSISTANT_TEMPERATURE`, `ASSISTANT_MAX_TOKENS`, `ASSISTANT_FREQUENCY_PENALTY`, `ASSISTANT_PRODUCT_DESCRIPTION_TEMPERATURE`, `ASSISTANT_PRODUCT_DESCRIPTION_MAX_TOKENS`
+
+**GĐ2 — RAG context + prompt**
+- `policy-search.page-size` 2→5; `shortText` cap 240→700 ký tự; dùng toàn bộ chunk (bỏ Math.min)
+- `buildSystemPrompt` bọc context trong `### CONTEXT ... ### END CONTEXT`
+- System prompt mặc định viết lại: quy tắc grounding + 2 few-shot ví dụ tiếng Việt
+- Env mới: `POLICY_SEARCH_PAGE_SIZE`
+
+**GĐ3 — Hybrid semantic search**
+- Thêm `EmbeddingClient` interface + `CloudEmbeddingClient` gọi `/embeddings`
+- `ElasticsearchPolicySearchClient`: khi `hybridSearchEnabled=true`, thêm `knn` clause cùng BM25; fallback về BM25 nếu embedding lỗi
+- Env mới: `ASSISTANT_EMBEDDING_MODEL`, `ASSISTANT_HYBRID_SEARCH_ENABLED` (mặc định false)
+
+**GĐ4 — Streaming + model classifier**
+- Endpoint mới: `GET /api/v1/assistant/chat/stream` → `text/event-stream` (SSE)
+- `CloudAssistantClient.generateStreamingReply()`: `stream=true`, đọc SSE line-by-line, parse `delta.content`
+- `AssistantServiceImpl.streamChat()`: async qua `CompletableFuture`, lưu hội thoại sau stream
+- `IntentClassifierProperties` thêm `model`; classifier dùng model riêng khi `ASSISTANT_INTENT_CLASSIFIER_MODEL` được cấu hình
+- Env mới: `ASSISTANT_INTENT_CLASSIFIER_MODEL`
+
+- New endpoints:
+  - `GET /api/v1/assistant/chat/stream?message=...` (SSE streaming, yêu cầu header X-User-Id)
+
+- Verification: `interaction-service`: 32 tests passed (tất cả xanh sau mỗi giai đoạn)
+
+---
+
+[2026-06-20] search-service + product-service — bổ sung nghiệp vụ tìm kiếm còn thiếu (branch: llm-upgrade)
+
+- Services: `search-service` (Elasticsearch `products_index`), `product-service` (`hsmart_product_db`)
+- Inter-service: RabbitMQ exchange `product.exchange` (topic)
+
+**Gap #2 — Lọc trạng thái khi search (rò rỉ sản phẩm chưa duyệt/đã bán)**
+- `ProductSearchServiceImpl.searchProducts` viết lại: gộp 2 nhánh browse/keyword về một `NativeQuery` bool, thêm `filter terms` theo `status`
+- Trạng thái hiển thị cấu hình được qua `search.visible-statuses` (mặc định `APPROVED,ACTIVE`) → loại `PENDING_REVIEW`, `SOLD`, `HIDDEN`
+- Env mới: `SEARCH_VISIBLE_STATUSES`
+
+**Gap #1 — Đồng bộ xóa sản phẩm vào index (orphan docs)**
+- `product-service`: thêm `PRODUCT_DELETED_ROUTING_KEY = product.event.deleted`; `ProductEventPublisher.publishProductDeleted`; `deleteProduct()` publish-after-commit
+- `search-service`: thêm queue `product.search.delete.queue` + binding; listener `handleProductDeleteEvent` → `ProductSearchService.deleteProduct(id)` (xóa document khỏi ES)
+
+**Gap #3 — Filter + sort + tối ưu phân trang**
+- `SearchController` thêm query param `category`, `minPrice`, `maxPrice`; sort theo `Pageable` (vd `?sort=price,asc`)
+- Phân trang mặc định đổi 20 → **12** khớp UI (12 sp/trang); search luôn truy ES theo trang (không tải toàn bộ)
+- Query: `match` trên `categoryName`, `range` trên `price` (chỉ thêm khi có tham số)
+
+- New/changed endpoints:
+  - `GET /api/v1/search/products?q=&category=&minPrice=&maxPrice=&page=&size=&sort=`
+
+- Verification:
+  - `search-service`: 7 tests passed (BUILD SUCCESS)
+  - `product-service`: 23 tests passed (BUILD SUCCESS)
+
+---
+
+[2026-06-21] live VPS deployment runbook streamlined and verified
+
+- Deployment target:
+  - GCP VPS `root@100.66.247.41`
+  - live repo `/home/thanh678x/h-smart`
+
+- Documentation updates:
+  - added a new fast-path section to `docs/DEPLOYMENT-GUIDE.md` for daily deploys
+  - documented two paths:
+    - fastest flow when code is already committed on the branch used by the VPS
+    - fastest safe flow when the local working tree has not been committed yet
+  - documented the verified `tar + scp + rsync` sync method that preserves:
+    - VPS `.env`
+    - VPS `.git`
+    - Docker volumes
+  - added a short post-deploy verification checklist
+
+- Live deployment performed:
+  - created VPS backup archive under `/home/thanh678x/deploy-backups/`
+  - synced the current local working tree to the VPS
+  - ran `docker compose -f docker-compose-gcp.yml up -d --build`
+  - verified `api-gateway` health on `http://127.0.0.1:8000/health`
+  - confirmed the full stack reached healthy state
+
+- Review service schema repair:
+  - found a one-time schema drift on `hsmart_review_db.reviews`
+  - Hibernate could not add `updated_at NOT NULL` because legacy rows already existed
+  - repaired the database by:
+    - adding `updated_at`
+    - backfilling it from `created_at`
+    - applying `NOT NULL`
+  - restarted `review-service`
+  - verified `select count(*) from reviews where updated_at is null` returned `0`
+
+---
+
+[2026-06-22] interaction-service assistant knowledge and grounding corrected
+
+- Revalidated the assistant knowledge base against the current user, product, order, and review service code.
+- Corrected stale or unsupported claims:
+  - shipping now documents both GHTK and Viettel Post, with Viettel Post as the current default
+  - removed the unsupported three-day return/refund promise
+  - removed the claim that editing a listing title automatically returns it to review
+  - documented the 24-hour offer lifetime, one-hour resubmit cooldown, and 30-minute pending-order timeout
+  - documented that only `APPROVED` products can be ordered
+- Tightened the assistant system prompt so general safety advice is not presented as official H-Smart policy and private account state is not invented.
+- Narrowed `SYSTEM` intent to the latest/recent order lookup that the current runtime can actually retrieve.
+- Added deterministic local intent fallback for common account, listing, offer, shipping, and latest-order questions when the classifier provider is unavailable.
+- Made policy retrieval limits configurable:
+  - `POLICY_SEARCH_PAGE_SIZE=5`
+  - `POLICY_SEARCH_MAX_CHUNKS=3`
+  - `POLICY_SEARCH_MIN_SCORE=0.5`
+- Added an idempotent 16-document Elasticsearch knowledge dataset with stable document IDs:
+  - `interaction-service/src/main/resources/knowledge/hsmart-knowledge.ndjson`
+- Added `scripts/load-assistant-knowledge.ps1` to create the index mapping, bulk load the dataset, detect bulk item failures, and refresh the index.
+- Rewrote `docs/assistant-knowledge-base.md` as the human-readable source-of-truth guide.
+- Verification:
+  - `interaction-service`: `mvn -q test` passed
+  - NDJSON validation found 16 documents and 16 unique titles
+  - PowerShell loader syntax validation passed
+[2026-06-22] report flow upgraded with audit, history filter, dedupe, and admin queue notifications
+
+- Upgraded `admin-service` report moderation from a pending-only queue into an auditable workflow:
+  - `Report` now stores `processedAt`, `processedBy`, and `resolutionReason`
+  - `ReportResponseDTO` now returns those audit fields
+  - `ReportActionRequestDTO` now accepts optional `resolutionReason`
+  - admin report processing now requires `X-User-Id` so the acting admin is recorded
+- Expanded admin report read APIs:
+  - replaced pending-only read flow with `GET /api/v1/admin/reports?status=&page=&size=`
+  - omitting `status` returns full report history; passing `PENDING|RESOLVED|DISMISSED` filters the queue
+- Added duplicate pending report protection:
+  - `submitReport` now rejects a second `PENDING` report from the same reporter for the same product with `409 Conflict`
+- Integrated reports into the admin notification feed:
+  - every new report creates an `admin_notifications` entry with type `REPORT_PENDING`
+  - `admin_notifications` now supports optional `reportId`
+  - resolving or dismissing a report marks the matching admin notification processed with audit metadata
+- Verification:
+  - `admin-service`: `mvn -q test` passed
+
+[2026-06-22] notification feeds upgraded for user realtime UX and admin moderation queue
+
+- Upgraded `interaction-service` notifications without breaking the existing `GET /api/v1/interactions/notifications` contract:
+  - added richer payload fields: `title`, `orderId`, `offerId`, `senderId`
+  - added `unreadCount` to notification responses for realtime badge updates
+  - added `GET /api/v1/interactions/notifications/page?read=&type=&page=&size=`
+  - added `PATCH /api/v1/interactions/notifications/{notificationId}/read`
+  - added `PATCH /api/v1/interactions/notifications/read-all`
+  - added `GET /api/v1/interactions/notifications/unread-count`
+  - kept STOMP realtime delivery on `/user/queue/notifications`
+- Localized and enriched notification producers:
+  - `order-service` offer notifications now send Vietnamese titles/messages plus `offerId`
+  - `order-service` order-cancel notifications now send Vietnamese titles/messages plus `orderId`
+  - product sold notifications now use Vietnamese copy and a notification title
+- Upgraded `admin-service` moderation notifications into a usable feed:
+  - added `GET /api/v1/admin/notifications?processed=&page=&size=`
+  - added `GET /api/v1/admin/notifications/unread-count`
+  - extended `admin_notifications` with `processedAt`, `processedBy`, and `resolutionReason`
+  - manual moderation now records `X-User-Id` and optional moderation reason for audit
+- Verification:
+  - `interaction-service`: `mvn -q test` passed
+  - `admin-service`: `mvn -q test` passed
+
+[2026-06-27] Lọc sản phẩm theo tỉnh/thành (province) — denormalize vị trí người bán vào product + search index
+
+- Mục tiêu hiệu năng: filter theo tỉnh không phát sinh lời gọi mạng lúc query. Vị trí (tỉnh/thành) được snapshot vào dữ liệu được tìm kiếm thay vì enrich từ user-service mỗi lần đọc.
+- `user-service` (DB: hsmart_user_db):
+  - `UserAddressResponseDTO` + `UserServiceImpl.getUserAddress` nay trả thêm `provinceCode` (lấy từ `User.provinceCode`).
+  - Endpoint nội bộ không đổi: `GET /api/v1/users/internal/{userId}/address`.
+  - Dropdown tỉnh cho FE dùng API có sẵn: `GET /api/v1/locations/provinces`.
+- `product-service` (DB: hsmart_product_db):
+  - `Product` entity thêm cột `province_code`, `province`, `district` (Hibernate ddl-auto=update tự tạo).
+  - `ProductServiceImpl.applySellerLocationSnapshot` snapshot vị trí người bán vào product lúc create/update (chỉ ghi đè khi user-service trả dữ liệu).
+  - Bỏ N+1: `enrichSellerLocation` đọc từ snapshot trên product; chỉ fallback gọi user-service cho tin cũ (chưa có snapshot).
+  - `ProductSearchEvent` mang thêm `provinceCode`, `province` để index.
+  - Filter danh sách: `GET /api/v1/products?provinceCode=` (thêm điều kiện Specification theo `province_code`).
+  - `UserAddressResponseDTO` record thêm `provinceCode`.
+- `search-service` (Elasticsearch products_index):
+  - `ProductDocument` thêm `provinceCode` (Keyword, filter) và `province` (Keyword, hiển thị).
+  - `ProductSearchServiceImpl` index 2 trường mới và thêm `term` filter theo `provinceCode`.
+  - Filter tìm kiếm: `GET /api/v1/search/products?provinceCode=`.
+  - `ProductSearchResponseDTO` trả thêm `provinceCode`, `province`.
+- Inter-service flow: product-service -> RabbitMQ ProductSearchEvent (kèm provinceCode/province) -> search-service index. Vị trí lấy 1 lần từ user-service lúc đăng/sửa tin.
+- Lưu ý staleness: người bán đổi địa chỉ thì tin cũ giữ tỉnh cũ trong index cho tới khi tin được lưu lại; reindex thủ công khi cần (chưa làm event auto-reindex theo địa chỉ).
+- Verification:
+  - `user-service`: `mvn -o test` passed (36 tests)
+  - `product-service`: `mvn -o test` passed (33 tests)
+  - `search-service`: `mvn -o test` passed (7 tests)
+
+[2026-06-28] Phí nền tảng do người bán trả khi xác nhận đơn — cộng vào tài khoản hệ thống (ví + sổ giao dịch)
+
+- Mục tiêu nghiệp vụ: người bán phải thanh toán một khoản phí nền tảng khi xác nhận đơn; tiền được cộng vào "tài khoản hệ thống". Phí = phí giao hàng nhưng KHÔNG vượt quá 10% giá trị hàng (`platformFee = min(shippingFee, productAmount * maxRate)`). Cọc của người mua giữ nguyên (2 dòng tiền song song).
+- `order-service` (DB: hsmart_order_db):
+  - `Order` thêm cột `platform_fee` (numeric 12,2) và `seller_shipping_fee_paid` (boolean) — Hibernate ddl-auto=update tự tạo.
+  - `OrderServiceImpl.createOrder` tính & lưu `platformFee` qua `computePlatformFee(productAmount, shippingFee)`; trần đọc từ env `PLATFORM_FEE_MAX_RATE` (mặc định 0.10, key `platform.fee.max-rate`).
+  - `confirmOrder` thêm guard: chặn xác nhận nếu `sellerShippingFeePaid == false` ("Bạn cần thanh toán phí nền tảng trước khi xác nhận đơn hàng").
+  - Endpoint nội bộ mới: `GET /api/v1/orders/internal/{orderId}` (trả `OrderSummaryDTO`) và `POST /api/v1/orders/internal/{orderId}/platform-fee-paid` (đặt cờ đã trả). Bảo vệ bằng `X-Internal-Secret` (InternalSecurityFilter áp cho mọi request).
+  - `OrderResponseDTO` trả thêm `platformFee`, `sellerShippingFeePaid`.
+- `payment-service` (DB: hsmart_payment_db):
+  - Entity mới: `SystemAccount` (ví hệ thống singleton, code `PLATFORM`), `SystemLedgerEntry` (sổ giao dịch append-only), `PlatformFeePayment` (thanh toán phí của seller qua VNPay). Enum mới: `LedgerEntryType.PLATFORM_FEE_IN`, `LedgerDirection`.
+  - `SystemAccountServiceImpl.creditPlatformFee` cộng số dư + ghi 1 dòng ledger, idempotent theo `orderId` (kiểm tra ledger đã có).
+  - `PaymentServiceImpl`: thêm `createPlatformFee`/`getPlatformFee`; định tuyến callback VNPay theo `vnp_TxnRef` (tra DepositPayment trước, rồi PlatformFeePayment) trong cả `handleIpn` và `handleReturn`. Khi thanh toán phí thành công: set PAID → `creditPlatformFee` → gọi order-service đặt cờ `platform-fee-paid`. Hết hạn PENDING cũng quét cho platform-fee.
+  - `VnpayService.buildPaymentUrl` refactor thêm overload `(txnRef, amount, orderInfo, clientIp)` dùng chung cho deposit và platform-fee.
+  - `OrderClient`: thêm `getOrderSummary` + `markSellerShippingPaid` (gọi order-service nội bộ).
+  - Endpoint mới: `POST /api/v1/payments/platform-fee` (header `X-User-Id` = sellerId, body `{orderId}`) → trả VNPay payment URL; `GET /api/v1/payments/platform-fee/{id}`.
+- Inter-service flow: FE(seller) -> gateway -> payment-service `/platform-fee` (lấy `OrderSummary` từ order-service, tạo PlatformFeePayment, dựng URL VNPay) -> seller trả VNPay -> IPN/Return về payment-service -> set PAID + cộng ví hệ thống + ghi ledger -> báo order-service đặt cờ -> seller mới `confirm` được đơn.
+- Edge case (v1): hủy đơn sau khi seller đã trả phí nền tảng KHÔNG tự hoàn (chỉ log; có thể bổ sung DEBIT ledger + hoàn VNPay sau).
+- Chưa làm: phần FE (`../H-smart UI`) — nút "Thanh toán phí giao hàng/nền tảng" trước khi xác nhận đơn.
+- Verification:
+  - `payment-service`: `mvn -f payment-service/pom.xml test` passed (17 tests)
+  - `order-service`: `mvn -f order-service/pom.xml test` passed (52 tests)
+
+[2026-06-28] Admin xem tài khoản hệ thống & doanh thu phí nền tảng (read-only)
+
+- Mục tiêu: admin theo dõi dòng tiền phí nền tảng — số dư ví hệ thống, tổng phí đã thu, và sổ giao dịch chi tiết. Không có thao tác rút/điều chỉnh (giữ read-only).
+- `payment-service` (DB: hsmart_payment_db):
+  - `SystemLedgerRepository.sumAmountByDirection(direction)` (JPQL coalesce sum).
+  - `SystemAccountService.getSummary()` (số dư + tổng CREDIT/DEBIT + số giao dịch) và `getLedger(page, size)` (sổ giao dịch, mới nhất trước) — đều read-only.
+  - DTO mới: `SystemAccountSummaryDTO`, `SystemLedgerEntryDTO`, `PageResponseDTO` (chuẩn phân trang dùng chung).
+  - Endpoint nội bộ mới (bảo vệ `X-Internal-Secret`): `GET /api/v1/payments/internal/system-account`, `GET /api/v1/payments/internal/system-account/ledger?page=&size=`.
+- `admin-service` (DB: hsmart_admin_db):
+  - Thêm client tới payment-service: `payment-service.base-url` trong application.yml + bean `paymentServiceRestClient`/`paymentServiceProperties` trong `DownstreamClientConfig`.
+  - `PaymentAdminClient` + `PaymentServiceAdminClient` (gọi 2 endpoint nội bộ trên, convert sang DTO admin).
+  - `AdminAnalyticsService`: thêm `getSystemAccount()` + `getSystemLedger(page,size)`; `getOverviewStats()` gộp thêm `platformFeeRevenue` (best-effort: payment-service lỗi thì về 0, không làm hỏng dashboard).
+  - `OverviewStatsResponseDTO` thêm `platformFeeRevenue`.
+  - Controller mới `AdminSystemAccountController` (@RequestMapping `/api/v1/admin/system-account`): `GET /` (summary) và `GET /ledger?page=&size=`. Bảo vệ bởi `InternalSecurityFilter` + `AdminRoleFilter` (yêu cầu `X-User-Role=ADMIN`).
+- Inter-service flow: FE(admin) -> gateway (gắn X-Internal-Secret + X-User-Role) -> admin-service -> payment-service `/internal/system-account[/ledger]` -> trả số dư/sổ giao dịch.
+- Verification:
+  - `payment-service`: `mvn -f payment-service/pom.xml test` passed (20 tests)
+  - `admin-service`: `mvn -f admin-service/pom.xml test` passed (20 tests)

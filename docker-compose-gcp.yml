@@ -18,8 +18,8 @@ x-spring-environment: &spring-environment
 x-healthcheck: &spring-healthcheck
   interval: 10s
   timeout: 5s
-  retries: 10
-  start_period: 30s
+  retries: 25
+  start_period: 90s
 
 services:
   user-postgres-db:
@@ -85,6 +85,27 @@ services:
     networks:
       - h-smart-internal
 
+  payment-postgres-db:
+    image: postgres:16-alpine
+    container_name: h-smart-payment-postgres-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hsmart_payment_db
+      POSTGRES_USER: ${POSTGRES_USER:-hsmart}
+      POSTGRES_PASSWORD: ${PAYMENT_DB_PASSWORD:?PAYMENT_DB_PASSWORD is required}
+    volumes:
+      - payment-postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - h-smart-internal
+
   review-postgres-db:
     image: postgres:16-alpine
     container_name: h-smart-review-postgres-db
@@ -128,7 +149,7 @@ services:
       - h-smart-internal
 
   interaction-mongo-db:
-    image: mongo:7
+    image: mongo:4.4
     container_name: h-smart-interaction-mongo-db
     restart: unless-stopped
     environment:
@@ -139,7 +160,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - mongosh --quiet --username "$$MONGO_INITDB_ROOT_USERNAME" --password "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping').ok" localhost:27017/admin | grep 1
+        - mongo --quiet --username "$$MONGO_INITDB_ROOT_USERNAME" --password "$$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin --eval "db.adminCommand('ping').ok" localhost:27017/admin | grep 1
       interval: 10s
       timeout: 5s
       retries: 10
@@ -250,6 +271,8 @@ services:
       MAIL_STARTTLS_ENABLE: ${MAIL_STARTTLS_ENABLE:-true}
       MAIL_FROM: ${MAIL_FROM:?MAIL_FROM is required}
       FRONTEND_BASE_URL: ${FRONTEND_BASE_URL:?FRONTEND_BASE_URL is required}
+      APP_PUBLIC_BASE_URL: ${PUBLIC_API_BASE_URL:?PUBLIC_API_BASE_URL is required}
+      STORAGE_UPLOAD_DIR: /app/uploads
       EMAIL_VERIFICATION_TOKEN_MINUTES: ${EMAIL_VERIFICATION_TOKEN_MINUTES:-1440}
       PASSWORD_RESET_TOKEN_MINUTES: ${PASSWORD_RESET_TOKEN_MINUTES:-30}
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "0.0"
@@ -260,6 +283,8 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    volumes:
+      - user-uploads:/app/uploads
     healthcheck:
       <<: *spring-healthcheck
       test:
@@ -276,7 +301,7 @@ services:
       <<: *spring-environment
       SERVER_PORT: "8082"
       APP_PUBLIC_BASE_URL: ${PUBLIC_API_BASE_URL:-http://localhost:8000}
-      AI_SERVICE_BASE_URL: ${EXTERNAL_AI_SERVICE_URL:?EXTERNAL_AI_SERVICE_URL is required}
+      AI_SERVICE_BASE_URL: http://ai-service:8000
       AI_SERVICE_CONNECT_TIMEOUT_MS: ${AI_SERVICE_CONNECT_TIMEOUT_MS:-2000}
       AI_SERVICE_READ_TIMEOUT_MS: ${AI_SERVICE_READ_TIMEOUT_MS:-60000}
       INTERACTION_SERVICE_BASE_URL: http://interaction-service:8083
@@ -338,6 +363,12 @@ services:
       INTERACTION_SERVICE_BASE_URL: http://interaction-service:8083
       INTERACTION_SERVICE_CONNECT_TIMEOUT_MS: "2000"
       INTERACTION_SERVICE_READ_TIMEOUT_MS: "3000"
+      PAYMENT_SERVICE_BASE_URL: http://payment-service:8087
+      PAYMENT_SERVICE_CONNECT_TIMEOUT_MS: "2000"
+      PAYMENT_SERVICE_READ_TIMEOUT_MS: "3000"
+      APP_PUBLIC_BASE_URL: ${PUBLIC_API_BASE_URL:?PUBLIC_API_BASE_URL is required}
+      STORAGE_UPLOAD_DIR: /app/uploads
+      ORDER_RETURN_WINDOW_DAYS: ${ORDER_RETURN_WINDOW_DAYS:-3}
       GHTK_API_URL: ${GHTK_API_URL:-https://services.giaohangtietkiem.vn}
       GHTK_API_TOKEN: ${GHTK_API_TOKEN:-}
       GHTK_CONNECT_TIMEOUT_MS: "2000"
@@ -368,11 +399,49 @@ services:
         condition: service_healthy
       rabbitmq:
         condition: service_healthy
+    volumes:
+      - order-uploads:/app/uploads
     healthcheck:
       <<: *spring-healthcheck
       test:
         - CMD-SHELL
         - 'curl -fsS -H "X-Internal-Secret: $$INTERNAL_SHARED_SECRET" http://localhost:8085/health || exit 1'
+
+  payment-service:
+    <<: *spring-service
+    build:
+      context: ./payment-service
+      dockerfile: Dockerfile
+    container_name: h-smart-payment-service
+    environment:
+      <<: *spring-environment
+      SERVER_PORT: "8087"
+      SPRING_DATASOURCE_URL: jdbc:postgresql://payment-postgres-db:5432/hsmart_payment_db
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-hsmart}
+      SPRING_DATASOURCE_PASSWORD: ${PAYMENT_DB_PASSWORD:?PAYMENT_DB_PASSWORD is required}
+      ORDER_SERVICE_BASE_URL: http://order-service:8085
+      ORDER_SERVICE_CONNECT_TIMEOUT_MS: "2000"
+      ORDER_SERVICE_READ_TIMEOUT_MS: "5000"
+      VNPAY_PAY_URL: ${VNPAY_PAY_URL:-https://sandbox.vnpayment.vn/paymentv2/vpcpay.html}
+      VNPAY_TMN_CODE: ${VNPAY_TMN_CODE:?VNPAY_TMN_CODE is required}
+      VNPAY_HASH_SECRET: ${VNPAY_HASH_SECRET:?VNPAY_HASH_SECRET is required}
+      VNPAY_RETURN_URL: ${VNPAY_RETURN_URL:-https://hsmart.thatcherdev.id.vn/api/v1/payments/vnpay/return}
+      VNPAY_RESULT_REDIRECT_URL: ${VNPAY_RESULT_REDIRECT_URL:-https://hsmart.thatcherdev.id.vn/payment-result}
+      VNPAY_EXPIRE_MINUTES: "15"
+      PAYMENT_PENDING_TIMEOUT_MINUTES: "30"
+      MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "0.0"
+    depends_on:
+      discovery-server:
+        condition: service_healthy
+      payment-postgres-db:
+        condition: service_healthy
+      order-service:
+        condition: service_healthy
+    healthcheck:
+      <<: *spring-healthcheck
+      test:
+        - CMD-SHELL
+        - 'curl -fsS -H "X-Internal-Secret: $$INTERNAL_SHARED_SECRET" http://localhost:8087/health || exit 1'
 
   review-service:
     <<: *spring-service
@@ -440,9 +509,12 @@ services:
       ORDER_SERVICE_READ_TIMEOUT_MS: "3000"
       POLICY_SEARCH_BASE_URL: http://elasticsearch:9200
       POLICY_SEARCH_INDEX_NAME: hsmart-policy-index
-      POLICY_SEARCH_PAGE_SIZE: "2"
+      POLICY_SEARCH_PAGE_SIZE: "5"
+      POLICY_SEARCH_MAX_CHUNKS: "3"
+      POLICY_SEARCH_MIN_SCORE: "0.5"
       POLICY_SEARCH_CONNECT_TIMEOUT_MS: "1000"
       POLICY_SEARCH_READ_TIMEOUT_MS: "3000"
+      STORAGE_UPLOAD_DIR: /app/uploads
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "0.0"
     depends_on:
       discovery-server:
@@ -455,6 +527,8 @@ services:
         condition: service_healthy
       elasticsearch:
         condition: service_healthy
+    volumes:
+      - interaction-uploads:/app/uploads
     healthcheck:
       <<: *spring-healthcheck
       test:
@@ -545,7 +619,7 @@ services:
       JAVA_OPTS: "-Xms512m -Xmx512m -Dresilience4j.timelimiter.instances.assistantCircuitBreaker.timeoutDuration=${ASSISTANT_CIRCUIT_BREAKER_TIMEOUT:-60s} -Dresilience4j.timelimiter.instances.assistantCircuitBreaker.cancelRunningFuture=false"
       SERVER_PORT: "8000"
       APP_CORS_ALLOWED_ORIGIN_PATTERNS: ${APP_CORS_ALLOWED_ORIGIN_PATTERNS:-http://localhost:3000,http://localhost:5173,https://hsmart.thatcherdev.id.vn,https://instance-20260601-031713.tail0e1958.ts.net}
-      AI_SERVICE_URL: ${EXTERNAL_AI_SERVICE_URL:?EXTERNAL_AI_SERVICE_URL is required}
+      AI_SERVICE_URL: http://ai-service:8000
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET is required}
       GATEWAY_RESPONSE_TIMEOUT: ${GATEWAY_RESPONSE_TIMEOUT:-120s}
       SPRING_DATA_REDIS_HOST: redis
@@ -560,18 +634,6 @@ services:
       MANAGEMENT_TRACING_SAMPLING_PROBABILITY: "0.0"
     depends_on:
       discovery-server:
-        condition: service_healthy
-      user-service:
-        condition: service_healthy
-      product-service:
-        condition: service_healthy
-      interaction-service:
-        condition: service_healthy
-      order-service:
-        condition: service_healthy
-      review-service:
-        condition: service_healthy
-      admin-service:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -592,10 +654,14 @@ volumes:
   user-postgres-data:
   product-postgres-data:
   order-postgres-data:
+  payment-postgres-data:
   review-postgres-data:
   admin-postgres-data:
   interaction-mongo-data:
   rabbitmq-data:
   redis-data:
   elasticsearch-data:
+  user-uploads:
   product-uploads:
+  interaction-uploads:
+  order-uploads:

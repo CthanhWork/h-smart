@@ -12,9 +12,12 @@ import com.hsmart.backend.application.dto.LoginRequestDTO;
 import com.hsmart.backend.application.dto.RegisterRequestDTO;
 import com.hsmart.backend.application.mapper.UserMapper;
 import com.hsmart.backend.domain.entities.User;
+import com.hsmart.backend.infrastructure.config.AccountLifecycleProperties;
+import com.hsmart.backend.infrastructure.config.ApplicationProperties;
 import com.hsmart.backend.infrastructure.config.JwtService;
 import com.hsmart.backend.infrastructure.exception.AccountNotVerifiedException;
 import com.hsmart.backend.infrastructure.exception.InvalidCredentialsException;
+import com.hsmart.backend.infrastructure.persistence.AccountTokenRepository;
 import com.hsmart.backend.infrastructure.persistence.UserRepository;
 import com.hsmart.backend.service.AccountLifecycleService;
 import com.hsmart.backend.service.LocationCatalogService;
@@ -37,6 +40,8 @@ class AuthServiceImplTest {
     @Mock
     private JwtService jwtService;
     @Mock
+    private AccountTokenRepository accountTokenRepository;
+    @Mock
     private UserMapper userMapper;
     @Mock
     private AccountLifecycleService accountLifecycleService;
@@ -49,11 +54,14 @@ class AuthServiceImplTest {
     void setUp() {
         service = new AuthServiceImpl(
                 userRepository,
+                accountTokenRepository,
                 passwordEncoder,
                 jwtService,
                 userMapper,
                 accountLifecycleService,
-                locationCatalogService
+                locationCatalogService,
+                new AccountLifecycleProperties("https://hsmart.example", 1440, 30, 30, 10080),
+                new ApplicationProperties("http://localhost:8000")
         );
     }
 
@@ -66,7 +74,7 @@ class AuthServiceImplTest {
                 .build();
         when(passwordEncoder.encode(request.getPassword())).thenReturn("encoded");
         when(userRepository.save(any(User.class))).thenAnswer(invocation -> invocation.getArgument(0));
-        when(userMapper.toAuthResponse(any(User.class), org.mockito.ArgumentMatchers.isNull()))
+        when(userMapper.toAuthResponse(any(User.class), org.mockito.ArgumentMatchers.isNull(), org.mockito.ArgumentMatchers.isNull()))
                 .thenReturn(AuthResponseDTO.builder().build());
 
         service.register(request);

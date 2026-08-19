@@ -19,6 +19,6 @@ public class CreateOfferRequestDTO {
 
     @NotNull(message = "Discount percent is required")
     @Min(value = 1, message = "Discount percent must be at least 1")
-    @Max(value = 50, message = "Discount percent must be at most 50")
+    @Max(value = 99, message = "Discount percent must be at most 99")
     private Integer discountPercent;
 }

@@ -7,6 +7,8 @@ public record PolicySearchProperties(
         String baseUrl,
         String indexName,
         int pageSize,
+        int maxChunks,
+        double minScore,
         int connectTimeoutMs,
         int readTimeoutMs
 ) {

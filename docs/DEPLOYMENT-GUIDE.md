@@ -1,567 +1,248 @@
-# H-Smart GCP Deployment Guide
+# H-Smart Live VPS Deploy Guide
 
-## 1. Deployment Architecture
+This is the short runbook for daily deployments to the current live VPS.
+It is meant for agents and humans who need to test and deploy quickly.
 
-The current demo deployment uses a hybrid multi-cloud architecture:
+## 1. Current Live Target
 
-- GCP VPS:
-  - API Gateway
-  - Eureka discovery server
-  - Spring Boot microservices
-  - PostgreSQL databases
-  - MongoDB
-  - Redis
-  - RabbitMQ
-  - Elasticsearch
-- DigitalOcean AI VPS:
-  - FastAPI `ai-service`
-  - YOLO CPU inference
-  - Public port `8002` restricted to the GCP public IPv4 address
+- SSH user and host: `hoangchithanh23072003@100.110.169.59`
+- Public IP: `100.110.169.59`
+- Live repo: `/home/hoangchithanh23072003/h-smart`
+- Live compose file: `docker-compose-gcp.yml`
+- Public app port: `8000`
 
-The laptop and Tailscale relay remain documented as a fallback development mode.
-
-The GCP Compose file does not include:
-
-- `ai-service`
-- Logstash
-- Kibana
-- Zipkin
-- legacy `backend-service`
-
-Only TCP port `8000` is published by Docker. All databases, brokers, Eureka, and microservices remain reachable only through the internal Docker bridge network.
-
-## 2. Search Infrastructure
-
-Elasticsearch runs as a private, single-node search datastore for:
-
-- product indexing and search through `search-service`
-- POLICY document retrieval through `interaction-service`
-
-The container has a `2 GiB` memory limit and a `1 GiB` JVM heap. Port `9200` is not published to the VPS host.
-
-## 3. Prepare the GCP VPS
-
-Recommended operating system:
-
-- Ubuntu 24.04 LTS or another Ubuntu version supported by Docker Engine
-
-Recommended GCP firewall ingress rules:
-
-- TCP `22` from the administrator's trusted IP only
-- TCP `8000` from the required client networks
-
-Do not create public GCP firewall rules for:
-
-- PostgreSQL ports
-- MongoDB `27017`
-- Redis `6379`
-- RabbitMQ `5672` or `15672`
-- Eureka `8761`
-- service ports `8081` through `8087`
-
-Update the VPS:
+Preferred SSH command:
 
 ```bash
-sudo apt update
-sudo apt upgrade -y
-sudo apt install -y ca-certificates curl git
+ssh -i ~/.ssh/id_rsa_hsmart_new hoangchithanh23072003@100.110.169.59
 ```
 
-## 4. Install Docker Engine and Docker Compose
-
-Remove conflicting packages if this is a new server:
-
-```bash
-for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do
-  sudo apt-get remove -y "$pkg"
-done
-```
-
-Add Docker's official apt repository:
-
-```bash
-sudo install -m 0755 -d /etc/apt/keyrings
-sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-  -o /etc/apt/keyrings/docker.asc
-sudo chmod a+r /etc/apt/keyrings/docker.asc
-
-echo \
-  "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
-  $(. /etc/os-release && echo "${UBUNTU_CODENAME:-$VERSION_CODENAME}") stable" \
-  | sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
-
-sudo apt-get update
-sudo apt-get install -y \
-  docker-ce \
-  docker-ce-cli \
-  containerd.io \
-  docker-buildx-plugin \
-  docker-compose-plugin
-```
-
-Enable Docker:
-
-```bash
-sudo systemctl enable --now docker
-sudo docker run --rm hello-world
-sudo docker compose version
-```
-
-Optional non-root Docker access:
-
-```bash
-sudo usermod -aG docker "$USER"
-newgrp docker
-docker version
-```
-
-Docker group membership grants root-level privileges. Only add trusted VPS users.
-
-Official references:
-
-- https://docs.docker.com/engine/install/ubuntu/
-- https://docs.docker.com/engine/install/linux-postinstall/
-
-## 5. Connect the VPS and Laptop with Tailscale
-
-Install Tailscale on the GCP VPS:
-
-```bash
-curl -fsSL https://tailscale.com/install.sh | sh
-sudo tailscale up
-tailscale ip -4
-```
-
-Install Tailscale on the laptop and sign in to the same tailnet.
-
-The laptop must:
-
-- run `ai-service`
-- publish host port `8002`
-- allow inbound TCP `8002` on the Tailscale interface
-- remain awake while GCP needs AI inference
-
-On Windows with Docker Engine inside WSL, start the AI runtime with:
+Windows PowerShell:
 
 ```powershell
-cd D:\H-smart
-powershell -ExecutionPolicy Bypass -File .\scripts\start-ai-wsl.ps1
+ssh -i $env:USERPROFILE\.ssh\id_rsa_hsmart_new hoangchithanh23072003@100.110.169.59
 ```
 
-The script:
+Live `.env` must keep:
 
-- starts the existing `h-smart-ai-service` container
-- applies the `unless-stopped` restart policy
-- keeps the WSL distribution alive
-- waits until the YOLO inference service reports a healthy model
+```env
+PUBLIC_API_BASE_URL=https://hsmart.thatcherdev.id.vn
+```
 
-Find the laptop Tailscale IPv4 address:
+Notes:
+
+- The old VPS (`103.145.63.51` / `100.66.247.41`) is no longer the active production target.
+- The current live backend is on `100.110.169.59`.
+- `ai-service` is not running inside the live VPS compose stack right now.
+
+## 2. What Runs On The VPS
+
+- `api-gateway`
+- `discovery-server`
+- Spring Boot services
+- PostgreSQL databases
+- MongoDB
+- Redis
+- RabbitMQ
+- Elasticsearch
+
+Important:
+
+- only port `8000` is published to the host
+- `ai-service` is not part of `docker-compose-gcp.yml`
+- internal databases and service ports must stay private
+- `product-service` and `api-gateway` both consume `EXTERNAL_AI_SERVICE_URL`
+
+## 3. Fastest Deploy
+
+### Option A: code already committed
+
+Use this when the target code is already pushed to the branch used on the VPS.
 
 ```bash
-tailscale ip -4
-```
-
-Test from the GCP VPS:
-
-```bash
-curl --fail http://<IP-Tailscale-Laptop>:8002/health
-```
-
-Docker containers may not have a working route to the VPS Tailscale interface. Run the repository TCP relay on the VPS:
-
-```bash
-cd ~/h-smart
-nohup ./scripts/start-ai-proxy.sh <IP-Tailscale-Laptop> \
-  > /tmp/hsmart-ai-proxy.log 2>&1 &
-```
-
-Verify the relay from the VPS:
-
-```bash
-curl --fail http://127.0.0.1:18002/health
-```
-
-The GCP Compose file maps `host.docker.internal` to the Docker host gateway. Verify the complete container path:
-
-```bash
-docker compose -f docker-compose-gcp.yml exec product-service \
-  curl --fail http://host.docker.internal:18002/health
-```
-
-To start the relay automatically after a VPS reboot:
-
-```bash
-crontab -e
-```
-
-Add one line and replace the placeholder IP:
-
-```cron
-@reboot sleep 20 && cd /home/<VPS-USER>/h-smart && nohup ./scripts/start-ai-proxy.sh <IP-Tailscale-Laptop> > /tmp/hsmart-ai-proxy.log 2>&1 &
-```
-
-Official Tailscale reference:
-
-- https://tailscale.com/docs/install/linux
-
-## 5.1. Recommended Demo Mode: Dedicated DigitalOcean AI VPS
-
-For a more reliable demonstration, run `ai-service` on a separate CPU VPS instead of a laptop.
-
-Recommended minimum resources:
-
-- Ubuntu 24.04
-- 4 vCPU
-- 8 GB RAM
-- 40 GB SSD
-- 4 GB swap
-
-The deployed architecture becomes:
-
-```text
-GCP API Gateway and product-service
-    -> DigitalOcean public IPv4 port 8002
-    -> Docker ai-service
-    -> YOLO CPU inference
-```
-
-Install Docker on the AI VPS:
-
-```bash
-curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
-sudo sh /tmp/get-docker.sh
-sudo systemctl enable --now docker
-```
-
-Create swap:
-
-```bash
-sudo fallocate -l 4G /swapfile
-sudo chmod 600 /swapfile
-sudo mkswap /swapfile
-sudo swapon /swapfile
-echo '/swapfile none swap sw 0 0' | sudo tee -a /etc/fstab
-```
-
-Copy these files to `/opt/hsmart-ai`:
-
-- `docker-compose-ai-do.yml` as `docker-compose.yml`
-- the built `h-smart-ai-service:latest` Docker image
-- `household_yolo26n_best.pt` under `models/`
-
-Start the service:
-
-```bash
-cd /opt/hsmart-ai
-docker compose up -d
-curl --fail http://127.0.0.1:8002/health
-```
-
-Restrict port `8002` to the GCP public IPv4 address. Replace the placeholder:
-
-```bash
-GCP_PUBLIC_IP="<GCP-PUBLIC-IP>"
-
-sudo iptables -I DOCKER-USER 1 \
-  -m conntrack --ctstate ESTABLISHED,RELATED -j ACCEPT
-sudo iptables -I DOCKER-USER 2 \
-  -p tcp -s "${GCP_PUBLIC_IP}/32" \
-  -m conntrack --ctorigdstport 8002 -j ACCEPT
-sudo iptables -A DOCKER-USER \
-  -p tcp -m conntrack --ctorigdstport 8002 -j DROP
-```
-
-Install persistence and save the rules:
-
-```bash
-sudo DEBIAN_FRONTEND=noninteractive apt-get install -y iptables-persistent
-sudo netfilter-persistent save
-```
-
-Verify that GCP can access the service:
-
-```bash
-curl --fail http://<DIGITALOCEAN-PUBLIC-IP>:8002/health
-```
-
-Configure the GCP `.env`:
-
-```dotenv
-EXTERNAL_AI_SERVICE_URL=http://<DIGITALOCEAN-PUBLIC-IP>:8002
-```
-
-Apply the change:
-
-```bash
-docker compose -f docker-compose-gcp.yml up -d --force-recreate \
-  product-service api-gateway
-```
-
-DigitalOcean promotional credits are temporary. Destroy the Droplet when it is no longer needed to stop billing.
-
-## 6. Upload the Repository
-
-Example:
-
-```bash
-sudo mkdir -p /opt/h-smart
-sudo chown "$USER":"$USER" /opt/h-smart
-git clone <H-SMART-GIT-URL> /opt/h-smart
-cd /opt/h-smart
-```
-
-For later deployments:
-
-```bash
-cd /opt/h-smart
+ssh -i ~/.ssh/id_rsa_hsmart_new hoangchithanh23072003@100.110.169.59
+cd /home/hoangchithanh23072003/h-smart
 git pull --ff-only
-```
-
-## 7. Create the VPS Environment File
-
-Create `/opt/h-smart/.env`:
-
-```bash
-cd /opt/h-smart
-touch .env
-chmod 600 .env
-nano .env
-```
-
-Use URL-safe passwords for MongoDB because its credentials are embedded in a connection URI. Avoid `@`, `:`, `/`, `?`, and `#` unless the value is URL-encoded.
-
-Example:
-
-```dotenv
-EXTERNAL_AI_SERVICE_URL=http://host.docker.internal:18002
-PUBLIC_API_BASE_URL=http://<GCP-EXTERNAL-IP>:8000
-
-INTERNAL_SHARED_SECRET=<GENERATE_A_LONG_RANDOM_SECRET>
-JWT_SECRET=<GENERATE_A_BASE64_SECRET>
-JWT_EXPIRATION_MS=86400000
-
-POSTGRES_USER=hsmart
-USER_DB_PASSWORD=<USER_DATABASE_PASSWORD>
-PRODUCT_DB_PASSWORD=<PRODUCT_DATABASE_PASSWORD>
-ORDER_DB_PASSWORD=<ORDER_DATABASE_PASSWORD>
-REVIEW_DB_PASSWORD=<REVIEW_DATABASE_PASSWORD>
-ADMIN_DB_PASSWORD=<ADMIN_DATABASE_PASSWORD>
-
-MONGO_ROOT_USERNAME=hsmart
-MONGO_ROOT_PASSWORD=<URL_SAFE_MONGO_PASSWORD>
-
-RABBITMQ_USER=hsmart
-RABBITMQ_PASSWORD=<RABBITMQ_PASSWORD>
-REDIS_PASSWORD=<REDIS_PASSWORD>
-
-AI_PROVIDER_URL=https://generativelanguage.googleapis.com/v1beta/openai
-AI_PROVIDER_API_KEY=<AI_PROVIDER_API_KEY>
-AI_PROVIDER_MODEL=<AI_PROVIDER_MODEL>
-
-MAIL_ENABLED=true
-MAIL_HOST=smtp.gmail.com
-MAIL_PORT=587
-MAIL_USERNAME=<SMTP_ACCOUNT_EMAIL>
-MAIL_PASSWORD=<SMTP_APP_PASSWORD>
-MAIL_SMTP_AUTH=true
-MAIL_STARTTLS_ENABLE=true
-MAIL_FROM=<SMTP_ACCOUNT_EMAIL>
-FRONTEND_BASE_URL=https://<FRONTEND_DOMAIN>
-EMAIL_VERIFICATION_TOKEN_MINUTES=1440
-PASSWORD_RESET_TOKEN_MINUTES=30
-
-GHTK_API_URL=https://services.giaohangtietkiem.vn
-GHTK_API_TOKEN=
-GHTK_CLIENT_SOURCE=
-GHTK_WEBHOOK_HASH=
-
-VIETTEL_POST_API_URL=https://partnerdev.viettelpost.vn
-VIETTEL_POST_USERNAME=<VIETTEL_POST_PARTNER_USERNAME>
-VIETTEL_POST_PASSWORD=<VIETTEL_POST_PARTNER_PASSWORD>
-VIETTEL_POST_SERVICE_CODE=VCN
-VIETTEL_POST_SERVICE_EXTRA=
-VIETTEL_POST_PRODUCT_TYPE=HH
-VIETTEL_POST_ORDER_PAYMENT=3
-VIETTEL_POST_CHECK_UNIQUE=true
-```
-
-Generate secrets:
-
-```bash
-openssl rand -base64 48
-openssl rand -hex 32
-```
-
-Do not commit `.env`.
-
-For Gmail SMTP, enable two-step verification and create a Google App Password. Do not use the normal Google account password. `FRONTEND_BASE_URL` must point to the deployed frontend that handles `/verify-email` and `/reset-password`.
-
-The GCP Compose file requires SMTP credentials because newly registered accounts cannot log in until their email address is verified.
-
-## 8. Validate the Deployment Configuration
-
-Validate interpolation and YAML:
-
-```bash
-cd /opt/h-smart
 docker compose -f docker-compose-gcp.yml config --quiet
-```
-
-Review the service list:
-
-```bash
-docker compose -f docker-compose-gcp.yml config --services
-```
-
-Confirm that only port `8000` is published:
-
-```bash
-docker compose -f docker-compose-gcp.yml config \
-  | grep -A 5 -B 2 "published:"
-```
-
-## 9. Build and Start H-Smart
-
-Configure the Linux virtual memory requirement used by Elasticsearch:
-
-```bash
-echo 'vm.max_map_count=262144' \
-  | sudo tee /etc/sysctl.d/99-elasticsearch.conf
-sudo /sbin/sysctl --system
-sudo /sbin/sysctl vm.max_map_count
-```
-
-The final command must report at least `262144`.
-
-Build images:
-
-```bash
-docker compose -f docker-compose-gcp.yml build
-```
-
-Start the deployment:
-
-```bash
-docker compose -f docker-compose-gcp.yml up -d
-```
-
-The equivalent one-command deployment is:
-
-```bash
 docker compose -f docker-compose-gcp.yml up -d --build
-```
-
-## 10. Verify the Deployment
-
-Check container state:
-
-```bash
 docker compose -f docker-compose-gcp.yml ps
+curl --fail http://127.0.0.1:8000/health
 ```
 
-Check API Gateway:
+### Option B: local working tree not committed yet
+
+Use this when the code exists only on the local machine and must be synced safely to the live VPS.
+
+Step 1 on Windows from `D:\H-smart`:
+
+```powershell
+$ts = Get-Date -Format 'yyyyMMdd-HHmmss'
+$list = "D:\H-smart\tmp\deploy-file-list-$ts.txt"
+$archive = "D:\H-smart\tmp\h-smart-deploy-source-$ts.tar.gz"
+
+git ls-files --cached --others --exclude-standard |
+  Where-Object {
+    $_ -and
+    $_ -notmatch '/$' -and
+    $_ -notmatch '^\.claude/' -and
+    $_ -notmatch '^tmp/' -and
+    $_ -notmatch '\.tar\.gz$'
+  } | Set-Content -Encoding Ascii $list
+
+tar -czf $archive -T $list
+scp -i ~/.ssh/id_rsa_hsmart_new $archive hoangchithanh23072003@100.110.169.59:/tmp/h-smart-deploy-source.tar.gz
+```
+
+Step 2 on the VPS:
 
 ```bash
-curl --fail http://localhost:8000/health
-curl --fail http://<GCP-EXTERNAL-IP>:8000/health
+ssh -i ~/.ssh/id_rsa_hsmart_new hoangchithanh23072003@100.110.169.59 '
+  set -e
+  mkdir -p /home/hoangchithanh23072003/deploy-backups
+  ts=$(date +%Y%m%d-%H%M%S)
+  tar -czf /home/hoangchithanh23072003/deploy-backups/h-smart-repo-$ts.tar.gz \
+    -C /home/hoangchithanh23072003 h-smart
+  stage=/tmp/h-smart-sync-$ts
+  rm -rf "$stage"
+  mkdir -p "$stage"
+  tar -xzf /tmp/h-smart-deploy-source.tar.gz -C "$stage"
+  rsync -a --delete --exclude .env --exclude .git \
+    "$stage"/ /home/hoangchithanh23072003/h-smart/
+  rm -rf "$stage"
+  cd /home/hoangchithanh23072003/h-smart
+  docker compose -f docker-compose-gcp.yml config --quiet
+  docker compose -f docker-compose-gcp.yml up -d --build
+  docker compose -f docker-compose-gcp.yml ps
+  curl --fail http://127.0.0.1:8000/health
+'
 ```
 
-Inspect logs:
+This flow preserves:
+
+- `/home/hoangchithanh23072003/h-smart/.env`
+- the VPS `.git` directory
+- Docker volumes
+
+Backups are stored under:
 
 ```bash
-docker compose -f docker-compose-gcp.yml logs --tail=200 api-gateway
-docker compose -f docker-compose-gcp.yml logs --tail=200 product-service
-docker compose -f docker-compose-gcp.yml logs --tail=200 admin-service
-docker compose -f docker-compose-gcp.yml logs --tail=200 elasticsearch search-service
+/home/hoangchithanh23072003/deploy-backups
 ```
 
-Verify the AI connection from inside `product-service`:
+## 4. Fast Verification
+
+Run this after every deploy:
 
 ```bash
-docker compose -f docker-compose-gcp.yml exec product-service \
-  sh -c 'curl --fail "$AI_SERVICE_BASE_URL/health"'
+ssh -i ~/.ssh/id_rsa_hsmart_new hoangchithanh23072003@100.110.169.59 '
+  cd /home/hoangchithanh23072003/h-smart
+  docker compose -f docker-compose-gcp.yml ps
+  curl --fail http://127.0.0.1:8000/health
+  docker compose -f docker-compose-gcp.yml logs --tail=80 \
+    api-gateway product-service order-service user-service \
+    review-service admin-service interaction-service search-service payment-service
+'
 ```
 
-Verify that internal services are not published:
+The deploy is good when:
+
+- `api-gateway` is `healthy`
+- the main Spring Boot services are `healthy`
+- `curl http://127.0.0.1:8000/health` returns `200`
+- no service is stuck in a restart loop
+
+## 5. Known Repair: review-service `updated_at`
+
+If `review-service` logs an error like:
+
+- `add column updated_at timestamp(6) not null`
+- `column "updated_at" of relation "reviews" contains null values`
+
+run this one-time repair:
 
 ```bash
-docker ps --format 'table {{.Names}}\t{{.Ports}}'
+docker exec h-smart-review-postgres-db \
+  psql -U hsmart -d hsmart_review_db -v ON_ERROR_STOP=1 \
+  -c 'ALTER TABLE reviews ADD COLUMN IF NOT EXISTS updated_at timestamp(6) without time zone;' \
+  -c 'UPDATE reviews SET updated_at = created_at WHERE updated_at IS NULL;' \
+  -c 'ALTER TABLE reviews ALTER COLUMN updated_at SET NOT NULL;'
+
+cd /home/hoangchithanh23072003/h-smart
+docker compose -f docker-compose-gcp.yml restart review-service
+docker compose -f docker-compose-gcp.yml ps review-service
 ```
 
-Only `h-smart-api-gateway` should show a host mapping.
-
-Verify Elasticsearch from its private Docker network:
+Confirm the backfill:
 
 ```bash
-docker compose -f docker-compose-gcp.yml exec elasticsearch \
-  curl --fail http://localhost:9200/_cluster/health
+docker exec h-smart-review-postgres-db \
+  psql -U hsmart -d hsmart_review_db -t -A \
+  -c 'select count(*) from reviews where updated_at is null;'
 ```
 
-Elasticsearch is intentionally not published on the VPS host.
+The final query must return `0`.
 
-## 11. Operations
+## 6. Useful Operations
 
 Restart one service:
 
 ```bash
+cd /home/hoangchithanh23072003/h-smart
 docker compose -f docker-compose-gcp.yml restart product-service
 ```
 
 Rebuild one service:
 
 ```bash
+cd /home/hoangchithanh23072003/h-smart
 docker compose -f docker-compose-gcp.yml up -d --build product-service
 ```
 
 Follow logs:
 
 ```bash
+cd /home/hoangchithanh23072003/h-smart
 docker compose -f docker-compose-gcp.yml logs -f --tail=200
-```
-
-Verify the hybrid AI path after either machine restarts:
-
-```bash
-curl --fail http://<IP-Tailscale-Laptop>:8002/health
-curl --fail http://127.0.0.1:18002/health
-docker compose -f docker-compose-gcp.yml exec product-service \
-  curl --fail http://host.docker.internal:18002/health
 ```
 
 Stop containers without deleting data:
 
 ```bash
+cd /home/hoangchithanh23072003/h-smart
 docker compose -f docker-compose-gcp.yml down
 ```
 
-Never use `down -v` on production unless all persistent database and upload data may be deleted.
+Do not use `down -v` on production unless data loss is acceptable.
 
-## 12. Backup Priorities
+## 7. Minimal Safety Rules
 
-Back up these named volumes:
+- keep `.env` on the VPS private and unchanged unless you are intentionally rotating config
+- publish only port `8000`
+- do not expose PostgreSQL, MongoDB, Redis, RabbitMQ, or Eureka publicly
+- back up before syncing an uncommitted working tree to the VPS
 
-- `h-smart-gcp_user-postgres-data`
-- `h-smart-gcp_product-postgres-data`
-- `h-smart-gcp_order-postgres-data`
-- `h-smart-gcp_review-postgres-data`
-- `h-smart-gcp_admin-postgres-data`
-- `h-smart-gcp_interaction-mongo-data`
-- `h-smart-gcp_rabbitmq-data`
-- `h-smart-gcp_redis-data`
-- `h-smart-gcp_elasticsearch-data`
-- `h-smart-gcp_product-uploads`
+## 8. AI Service Status
 
-Database-native backups with `pg_dump` and `mongodump` are preferred over copying live volume files.
+Current state as of 2026-07-09:
 
-## 13. Security Checklist
+- `ai-service` now runs inside `docker-compose-gcp.yml` on the live VPS.
+- Both `product-service` and `api-gateway` point to `http://ai-service:8000`.
+- The service uses the model at `/app/models/household_yolo26n_best.pt`.
+- Health check:
+  - `GET http://ai-service:8000/health`
+  - `GET http://127.0.0.1:8000/health` for the gateway
 
-- Restrict SSH to trusted source IPs.
-- Publish only API Gateway port `8000`.
-- Keep `.env` permissions at `600`.
-- Use unique passwords for each database.
-- Rotate any API key previously shared in chat or logs.
-- Restrict laptop AI access with Tailscale ACLs.
-- Do not expose the RabbitMQ management UI publicly.
-- Do not expose Eureka publicly.
-- Keep Docker Engine and Ubuntu security updates current.
-- Put HTTPS in front of port `8000` before production user traffic.
+Useful checks:
+
+```bash
+docker compose -f docker-compose-gcp.yml ps ai-service
+curl --fail http://ai-service:8000/health
+curl --fail http://127.0.0.1:8000/health
+```
+
+If AI features break after a deploy:
+
+- check `ai-service` logs first
+- confirm the model file exists in `/home/hoangchithanh23072003/h-smart/ai-service/models/household_yolo26n_best.pt`
+- confirm `product-service` and `api-gateway` were restarted after the stack update
+- do not assume the old external AI endpoint is still usable

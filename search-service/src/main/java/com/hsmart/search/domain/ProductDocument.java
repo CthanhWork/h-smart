@@ -37,4 +37,13 @@ public class ProductDocument {
 
     @Field(type = FieldType.Keyword)
     private String status;
+
+    @Field(type = FieldType.Keyword)
+    private String provinceCode;
+
+    @Field(type = FieldType.Keyword)
+    private String province;
+
+    @Field(type = FieldType.Keyword, index = false)
+    private String imageUrl;
 }

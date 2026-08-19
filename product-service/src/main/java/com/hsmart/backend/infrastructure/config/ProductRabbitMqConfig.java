@@ -21,6 +21,7 @@ public class ProductRabbitMqConfig {
     public static final String PRODUCT_CREATED_ROUTING_KEY = "product.event.created";
     public static final String PRODUCT_UPDATED_ROUTING_KEY = "product.event.updated";
     public static final String PRODUCT_SOLD_ROUTING_KEY = "product.event.sold";
+    public static final String PRODUCT_DELETED_ROUTING_KEY = "product.event.deleted";
     public static final String ORDER_EXCHANGE = "order.exchange";
     public static final String ORDER_PRODUCT_UPDATE_QUEUE = "order.product.update.queue";
     public static final String ORDER_COMPLETED_ROUTING_KEY = "order.event.completed";

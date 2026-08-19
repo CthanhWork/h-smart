@@ -2,6 +2,7 @@ package com.hsmart.backend.service.impl;
 
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -161,13 +162,16 @@ class ProductServiceImplTest {
         when(productMapper.toEntity(
                 eq("Used desk"),
                 eq(BigDecimal.valueOf(100)),
+                eq(false),
+                eq(null),
                 eq(ProductStatus.PENDING_REVIEW),
                 eq("seller-1"),
                 eq(null),
                 eq("Uncategorized Product"),
                 argThat(imageUrl -> imageUrl.startsWith("api/v1/products/media/")),
                 argThat(imageUrlsJson -> imageUrlsJson.contains("api/v1/products/media/")),
-                eq("[]")
+                eq("[]"),
+                eq(false)
         )).thenReturn(pendingProduct);
         when(productRepository.save(pendingProduct)).thenReturn(pendingProduct);
         when(productMapper.toResponse(eq(pendingProduct), anyList(), eq("http://localhost:8000")))
@@ -188,13 +192,16 @@ class ProductServiceImplTest {
         verify(productMapper).toEntity(
                 eq("Used desk"),
                 eq(BigDecimal.valueOf(100)),
+                eq(false),
+                eq(null),
                 eq(ProductStatus.PENDING_REVIEW),
                 eq("seller-1"),
                 eq(null),
                 eq("Uncategorized Product"),
                 any(String.class),
                 any(String.class),
-                eq("[]")
+                eq("[]"),
+                eq(false)
         );
     }
 
@@ -261,23 +268,26 @@ class ProductServiceImplTest {
         when(productMapper.toEntity(
                 eq("Clean used chair"),
                 eq(BigDecimal.valueOf(250000)),
+                eq(false),
+                eq(null),
                 eq(ProductStatus.PENDING_REVIEW),
                 eq("seller-1"),
                 eq(null),
-                eq("Ghe"),
+                eq("Ghế"),
                 anyString(),
                 anyString(),
-                anyString()
+                anyString(),
+                anyBoolean()
         )).thenAnswer(invocation -> Product.builder()
                 .id(30L)
-                .title(invocation.getArgument(5))
+                .title(invocation.getArgument(7))
                 .description(invocation.getArgument(0))
                 .price(invocation.getArgument(1))
-                .status(invocation.getArgument(2))
-                .sellerId(invocation.getArgument(3))
-                .imageUrl(invocation.getArgument(6))
-                .imageUrls(invocation.getArgument(7))
-                .aiMetadata(invocation.getArgument(8))
+                .status(invocation.getArgument(4))
+                .sellerId(invocation.getArgument(5))
+                .imageUrl(invocation.getArgument(8))
+                .imageUrls(invocation.getArgument(9))
+                .aiMetadata(invocation.getArgument(10))
                 .build());
         when(productRepository.save(any(Product.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
@@ -286,7 +296,7 @@ class ProductServiceImplTest {
         verify(visionService).detectObjects(secondImage);
         verify(visionService, org.mockito.Mockito.never()).detectObjects(firstImage);
         Assertions.assertEquals(ProductStatus.PENDING_REVIEW, result.getStatus());
-        Assertions.assertEquals("Ghe", result.getTitle());
+        Assertions.assertEquals("Ghế", result.getTitle());
         Assertions.assertEquals(2, result.getImageUrls().size());
         Assertions.assertTrue(result.getImageUrls().stream().allMatch(url ->
                 url.startsWith("http://localhost:8000/api/v1/products/media/")));
@@ -330,7 +340,7 @@ class ProductServiceImplTest {
     }
 
     @Test
-    void updateProductShouldRejectWhenUserDoesNotOwnProduct() {
+    void updateProductShouldRejectWhenUserDoesNotOwnProduct() throws Exception {
         UserContextHolder.setCurrentUserId("another-user");
         Product product = Product.builder()
                 .id(10L)
@@ -350,7 +360,7 @@ class ProductServiceImplTest {
                 .status(ProductStatus.SOLD)
                 .build();
 
-        assertThrows(OwnershipDeniedException.class, () -> productService.updateProduct(10L, request));
+        assertThrows(OwnershipDeniedException.class, () -> productService.updateProduct(10L, request, null));
     }
 
     @Test
@@ -370,11 +380,12 @@ class ProductServiceImplTest {
         productService.deleteProduct(11L);
 
         verify(productRepository, times(1)).save(product);
+        verify(productEventPublisher).publishProductDeleted(argThat(event -> event.getId().equals(11L)));
         Assertions.assertTrue(product.isDeleted());
     }
 
     @Test
-    void updateProductShouldRejectClientManagedStatusChanges() {
+    void updateProductShouldRejectClientManagedStatusChanges() throws Exception {
         UserContextHolder.setCurrentUserId("seller-1");
         Product product = Product.builder()
                 .id(12L)
@@ -395,7 +406,40 @@ class ProductServiceImplTest {
                 .build();
 
         assertThrows(org.springframework.web.server.ResponseStatusException.class,
-                () -> productService.updateProduct(12L, request));
+                () -> productService.updateProduct(12L, request, null));
+    }
+
+    @Test
+    void updateProductShouldAllowSellerToHideListing() throws Exception {
+        UserContextHolder.setCurrentUserId("seller-1");
+        Product product = Product.builder()
+                .id(20L)
+                .title("Chair")
+                .description("Used chair")
+                .price(BigDecimal.valueOf(300000))
+                .status(ProductStatus.APPROVED)
+                .sellerId("seller-1")
+                .aiMetadata("[]")
+                .imageUrls("[]")
+                .build();
+
+        when(productRepository.findByIdAndIsDeletedFalse(20L)).thenReturn(Optional.of(product));
+        when(productRepository.save(product)).thenReturn(product);
+
+        ProductRequestDTO request = ProductRequestDTO.builder()
+                .title("Chair")
+                .description("Used chair")
+                .price(BigDecimal.valueOf(300000))
+                .status(ProductStatus.HIDDEN)
+                .build();
+
+        productService.updateProduct(20L, request, null);
+
+        Assertions.assertEquals(ProductStatus.HIDDEN, product.getStatus());
+        verify(productRepository).save(product);
+        verify(productEventPublisher).publishProductUpdated(argThat(event ->
+                event.getId().equals(20L) && event.getStatus().equals("HIDDEN")
+        ));
     }
 
     @Test
@@ -513,10 +557,10 @@ class ProductServiceImplTest {
                 .product(product)
                 .build();
         Pageable pageable = PageRequest.of(0, 10, Sort.by(Sort.Direction.DESC, "createdAt"));
-        when(productLikeRepository.findAllByUserIdAndProductIsDeletedFalseAndProductStatusNot(
-                "user-1",
-                ProductStatus.SOLD,
-                pageable
+        when(productLikeRepository.findAllByUserIdAndProductIsDeletedFalseAndProductStatusIn(
+                eq("user-1"),
+                argThat(statuses -> statuses.contains(ProductStatus.APPROVED)),
+                eq(pageable)
         )).thenReturn(new PageImpl<>(List.of(productLike), pageable, 1));
         when(productMapper.toResponse(eq(product), anyList(), eq("http://localhost:8000"))).thenReturn(response);
 

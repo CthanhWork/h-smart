@@ -3,6 +3,7 @@ package com.hsmart.backend.presentation.controllers;
 import com.hsmart.backend.application.dto.ApiResponse;
 import com.hsmart.backend.application.dto.AuthResponseDTO;
 import com.hsmart.backend.application.dto.LoginRequestDTO;
+import com.hsmart.backend.application.dto.RefreshTokenRequestDTO;
 import com.hsmart.backend.application.dto.RegisterRequestDTO;
 import com.hsmart.backend.application.dto.EmailRequestDTO;
 import com.hsmart.backend.application.dto.ResetPasswordRequestDTO;
@@ -53,6 +54,18 @@ public class AuthController {
     public ResponseEntity<ApiResponse<AuthResponseDTO>> login(@Valid @RequestBody LoginRequestDTO request) {
         AuthResponseDTO response = authService.login(request);
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Login successful", response));
+    }
+
+    @PostMapping("/refresh")
+    public ResponseEntity<ApiResponse<AuthResponseDTO>> refresh(@Valid @RequestBody RefreshTokenRequestDTO request) {
+        AuthResponseDTO response = authService.refresh(request);
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Token refreshed successfully", response));
+    }
+
+    @PostMapping("/logout")
+    public ResponseEntity<ApiResponse<Void>> logout(@Valid @RequestBody RefreshTokenRequestDTO request) {
+        authService.logout(request);
+        return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Logout successful", null));
     }
 
     @PostMapping("/verify-email")

@@ -17,9 +17,14 @@ public class ChatMessage {
 
     @Id
     private String id;
+    private ChatMessageType messageType;
     private String senderId;
     private String receiverId;
     private Long productId;
     private String content;
+    private String mediaUrl;
+    private String mediaMimeType;
+    private Long mediaSizeBytes;
+    private String mediaOriginalFilename;
     private Instant timestamp;
 }

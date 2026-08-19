@@ -25,11 +25,13 @@ public interface UserMapper {
     @Mapping(target = "reviewCount", ignore = true)
     @Mapping(target = "active", ignore = true)
     @Mapping(target = "emailVerified", ignore = true)
+    @Mapping(target = "avatarUrl", ignore = true)
     void updateProfile(UpdateProfileRequestDTO request, @MappingTarget User user);
 
-    default AuthResponseDTO toAuthResponse(User user, String accessToken) {
+    default AuthResponseDTO toAuthResponse(User user, String accessToken, String refreshToken) {
         return AuthResponseDTO.builder()
                 .accessToken(accessToken)
+                .refreshToken(refreshToken)
                 .tokenType("Bearer")
                 .user(toProfileResponse(user))
                 .build();

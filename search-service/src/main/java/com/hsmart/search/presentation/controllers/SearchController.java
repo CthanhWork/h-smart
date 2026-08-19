@@ -4,6 +4,7 @@ import com.hsmart.search.application.dto.ApiResponse;
 import com.hsmart.search.application.dto.PageResponseDTO;
 import com.hsmart.search.application.dto.ProductSearchResponseDTO;
 import com.hsmart.search.service.ProductSearchService;
+import java.math.BigDecimal;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.web.PageableDefault;
@@ -24,9 +25,14 @@ public class SearchController {
     @GetMapping("/products")
     public ResponseEntity<ApiResponse<PageResponseDTO<ProductSearchResponseDTO>>> searchProducts(
             @RequestParam(name = "q", required = false) String query,
-            @PageableDefault(size = 20) Pageable pageable
+            @RequestParam(name = "category", required = false) String category,
+            @RequestParam(name = "minPrice", required = false) BigDecimal minPrice,
+            @RequestParam(name = "maxPrice", required = false) BigDecimal maxPrice,
+            @RequestParam(name = "provinceCode", required = false) String provinceCode,
+            @PageableDefault(size = 12) Pageable pageable
     ) {
-        PageResponseDTO<ProductSearchResponseDTO> products = productSearchService.searchProducts(query, pageable);
+        PageResponseDTO<ProductSearchResponseDTO> products =
+                productSearchService.searchProducts(query, category, minPrice, maxPrice, provinceCode, pageable);
         return ResponseEntity.ok(ApiResponse.success(HttpStatus.OK, "Products searched successfully", products));
     }
 }

@@ -11,4 +11,7 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class ProductStatsResponseDTO {
     private long totalSellingProducts;
+    private long totalPendingReview;
+    private long totalHidden;
+    private long totalSold;
 }

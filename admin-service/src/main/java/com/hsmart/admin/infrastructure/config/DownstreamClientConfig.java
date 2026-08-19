@@ -47,6 +47,24 @@ public class DownstreamClientConfig {
     }
 
     @Bean
+    public ServiceClientProperties paymentServiceProperties(
+            @Value("${payment-service.base-url:http://payment-service}") String baseUrl,
+            @Value("${payment-service.connect-timeout-ms:2000}") int connectTimeoutMs,
+            @Value("${payment-service.read-timeout-ms:3000}") int readTimeoutMs
+    ) {
+        return new ServiceClientProperties(baseUrl, connectTimeoutMs, readTimeoutMs);
+    }
+
+    @Bean
+    public ServiceClientProperties reviewServiceProperties(
+            @Value("${review-service.base-url:http://review-service}") String baseUrl,
+            @Value("${review-service.connect-timeout-ms:2000}") int connectTimeoutMs,
+            @Value("${review-service.read-timeout-ms:3000}") int readTimeoutMs
+    ) {
+        return new ServiceClientProperties(baseUrl, connectTimeoutMs, readTimeoutMs);
+    }
+
+    @Bean
     @Qualifier("productServiceRestClient")
     public RestClient productServiceRestClient(
             @Qualifier("loadBalancedRestClientBuilder") RestClient.Builder builder,
@@ -69,6 +87,24 @@ public class DownstreamClientConfig {
     public RestClient orderServiceRestClient(
             @Qualifier("loadBalancedRestClientBuilder") RestClient.Builder builder,
             @Qualifier("orderServiceProperties") ServiceClientProperties properties
+    ) {
+        return buildClient(builder, properties);
+    }
+
+    @Bean
+    @Qualifier("paymentServiceRestClient")
+    public RestClient paymentServiceRestClient(
+            @Qualifier("loadBalancedRestClientBuilder") RestClient.Builder builder,
+            @Qualifier("paymentServiceProperties") ServiceClientProperties properties
+    ) {
+        return buildClient(builder, properties);
+    }
+
+    @Bean
+    @Qualifier("reviewServiceRestClient")
+    public RestClient reviewServiceRestClient(
+            @Qualifier("loadBalancedRestClientBuilder") RestClient.Builder builder,
+            @Qualifier("reviewServiceProperties") ServiceClientProperties properties
     ) {
         return buildClient(builder, properties);
     }

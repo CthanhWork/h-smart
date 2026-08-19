@@ -18,6 +18,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.JdbcTypeCode;
 import org.hibernate.annotations.UpdateTimestamp;
 import org.hibernate.type.SqlTypes;
@@ -43,12 +44,28 @@ public class Product {
     @Column(precision = 12, scale = 2, nullable = false)
     private BigDecimal price;
 
+    @Builder.Default
+    @Column(nullable = false, columnDefinition = "boolean not null default false")
+    private boolean negotiable = false;
+
+    @Column(name = "min_price", precision = 12, scale = 2)
+    private BigDecimal minPrice;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private ProductStatus status;
 
     @Column(name = "seller_id", nullable = false, length = 150)
     private String sellerId;
+
+    @Column(name = "province_code", length = 20)
+    private String provinceCode;
+
+    @Column(name = "province", length = 100)
+    private String province;
+
+    @Column(name = "district", length = 100)
+    private String district;
 
     @Column(name = "image_url", columnDefinition = "text")
     private String imageUrl;
@@ -72,8 +89,16 @@ public class Product {
     private boolean isDeleted = false;
 
     @Builder.Default
+    @Column(name = "title_modified_by_user", nullable = false, columnDefinition = "boolean not null default false")
+    private boolean titleModifiedByUser = false;
+
+    @Builder.Default
     @Column(name = "like_count", nullable = false, columnDefinition = "bigint default 0")
     private long likeCount = 0;
+
+    @CreationTimestamp
+    @Column(name = "created_at", updatable = false)
+    private LocalDateTime createdAt;
 
     @UpdateTimestamp
     @Column(name = "updated_at")

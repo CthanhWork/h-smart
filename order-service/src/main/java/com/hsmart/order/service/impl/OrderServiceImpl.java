@@ -6,6 +6,8 @@ import com.hsmart.order.application.dto.OrderCompletedEvent;
 import com.hsmart.order.application.dto.OfferResponseDTO;
 import com.hsmart.order.application.dto.OrderResponseDTO;
 import com.hsmart.order.application.dto.OrderStatsResponseDTO;
+import com.hsmart.order.application.dto.OrderSummaryDTO;
+import com.hsmart.order.application.dto.PageResponseDTO;
 import com.hsmart.order.application.dto.ProductResponseDTO;
 import com.hsmart.order.application.dto.GhtkShipmentRequestDTO;
 import com.hsmart.order.application.dto.GhtkWebhookRequestDTO;
@@ -21,25 +23,44 @@ import com.hsmart.order.domain.entities.OfferStatus;
 import com.hsmart.order.domain.entities.Order;
 import com.hsmart.order.domain.entities.OrderStatus;
 import com.hsmart.order.domain.entities.ProductOffer;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.hsmart.order.infrastructure.config.ApplicationProperties;
 import com.hsmart.order.infrastructure.config.GhtkProperties;
+import com.hsmart.order.infrastructure.config.StorageProperties;
 import com.hsmart.order.infrastructure.messaging.OrderEventPublisher;
 import com.hsmart.order.infrastructure.persistence.OrderRepository;
 import com.hsmart.order.infrastructure.persistence.ProductOfferRepository;
+import com.hsmart.order.infrastructure.validation.FileValidator;
 import com.hsmart.order.service.NotificationClient;
 import com.hsmart.order.service.OrderService;
+import com.hsmart.order.service.PaymentClient;
 import com.hsmart.order.service.ProductClient;
 import com.hsmart.order.service.ShippingProviderClient;
 import com.hsmart.order.service.UserClient;
+import java.io.IOException;
+import java.io.InputStream;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.security.MessageDigest;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.multipart.MultipartFile;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -57,7 +78,6 @@ public class OrderServiceImpl implements OrderService {
     private static final List<OrderStatus> ACTIVE_ORDER_STATUSES = List.of(OrderStatus.PENDING, OrderStatus.PROCESSING);
     private static final List<OfferStatus> ACTIVE_OFFER_STATUSES = List.of(OfferStatus.PENDING, OfferStatus.ACCEPTED);
     private static final int OFFER_EXPIRATION_HOURS = 24;
-    private static final int MAX_OFFER_DISCOUNT_PERCENT = 30;
 
     private final OrderRepository orderRepository;
     private final ProductOfferRepository productOfferRepository;
@@ -67,9 +87,26 @@ public class OrderServiceImpl implements OrderService {
     private final OrderEventPublisher orderEventPublisher;
     private final GhtkProperties ghtkProperties;
     private final NotificationClient notificationClient;
+    private final PaymentClient paymentClient;
+    private final StorageProperties storageProperties;
+    private final ApplicationProperties applicationProperties;
+    private final ObjectMapper objectMapper;
+    private final FileValidator fileValidator;
 
     @Value("${orders.pending-timeout-minutes:30}")
     private long pendingTimeoutMinutes;
+
+    @Value("${orders.return-window-days:3}")
+    private long returnWindowDays;
+
+    @Value("${orders.return-approval-timeout-hours:48}")
+    private long returnApprovalTimeoutHours;
+
+    @Value("${offers.resubmit-cooldown-hours:1}")
+    private int offerResubmitCooldownHours;
+
+    @Value("${platform.fee.max-rate:0.10}")
+    private double platformFeeMaxRate;
 
     @Override
     public OrderResponseDTO createOrder(CreateOrderRequestDTO request, String buyerId) {
@@ -81,14 +118,18 @@ public class OrderServiceImpl implements OrderService {
         BigDecimal shippingFee = resolveShippingFee(product.sellerId(), buyerId, shippingProviderClient);
         ProductOffer checkoutOffer = resolveCheckoutOffer(request.getOfferId(), product, buyerId);
         BigDecimal productAmount = checkoutOffer != null ? checkoutOffer.getOfferPrice() : product.price();
+        BigDecimal platformFee = computePlatformFee(productAmount, shippingFee);
 
         Order order = Order.builder()
                 .buyerId(buyerId)
                 .sellerId(product.sellerId())
                 .productId(product.id())
+                .productTitle(product.title())
+                .productImageUrl(product.imageUrl())
                 .amount(productAmount.add(shippingFee))
                 .productAmount(productAmount)
                 .shippingFee(shippingFee)
+                .platformFee(platformFee)
                 .deliveryMethod(deliveryMethod)
                 .status(OrderStatus.PENDING)
                 .build();
@@ -143,8 +184,11 @@ public class OrderServiceImpl implements OrderService {
                 "guest",
                 "Guest buyer",
                 "0900000000",
+                null,
                 province.trim(),
+                null,
                 district.trim(),
+                null,
                 "Unknown ward",
                 "Guest address"
         );
@@ -205,8 +249,22 @@ public class OrderServiceImpl implements OrderService {
         }
     }
 
+    /**
+     * Platform fee the seller pays = the shipping fee, capped at {@code platformFeeMaxRate} of the
+     * product amount (the order value, excluding shipping). Rounded to 2 decimals, never negative.
+     */
+    private BigDecimal computePlatformFee(BigDecimal productAmount, BigDecimal shippingFee) {
+        if (shippingFee == null || shippingFee.signum() <= 0 || productAmount == null) {
+            return BigDecimal.ZERO;
+        }
+        BigDecimal cap = productAmount
+                .multiply(BigDecimal.valueOf(platformFeeMaxRate))
+                .setScale(2, RoundingMode.HALF_UP);
+        return shippingFee.min(cap).max(BigDecimal.ZERO).setScale(2, RoundingMode.HALF_UP);
+    }
+
     @Override
-    public OrderResponseDTO confirmOrder(Long orderId, String sellerId) {
+    public OrderResponseDTO confirmOrder(Long orderId, String sellerId, List<MultipartFile> evidenceImages) {
         Order order = findOrder(orderId);
         order = expirePendingOrderIfNeeded(order);
         if (!order.getSellerId().equals(sellerId)) {
@@ -215,21 +273,29 @@ public class OrderServiceImpl implements OrderService {
         if (order.getStatus() != OrderStatus.PENDING) {
             throw new OrderStateException("Only pending orders can be confirmed");
         }
+        if (!order.isSellerShippingFeePaid()) {
+            throw new OrderStateException("Bạn cần thanh toán phí nền tảng trước khi xác nhận đơn hàng");
+        }
 
+        List<MultipartFile> normalizedImages = normalizeImages(evidenceImages);
+        fileValidator.validateImages(normalizedImages); // Add validation
         ProductResponseDTO product = productClient.getProduct(order.getProductId(), sellerId);
         UserAddressResponseDTO sellerAddress = userClient.getUserAddress(order.getSellerId());
         UserAddressResponseDTO buyerAddress = userClient.getUserAddress(order.getBuyerId());
         ShippingProviderClient shippingProviderClient = resolveShippingProvider(order.getDeliveryMethod());
 
+        BigDecimal productAmount = resolveProductAmount(order, product.price());
         try {
             String trackingCode = shippingProviderClient.createShipment(new GhtkShipmentRequestDTO(
                     order.getId().toString(),
                     product.title(),
-                    resolveProductAmount(order, product.price()),
-                    order.getAmount(),
+                    productAmount,
+                    productAmount,
                     sellerAddress,
                     buyerAddress
             ));
+            // Lưu ảnh minh chứng chất lượng hàng trước khi gửi (bằng chứng cho đổi/trả sau này).
+            order.setEvidenceImages(writeJson(saveUploadedFiles(normalizedImages)));
             order.setTrackingCode(trackingCode);
             order.setStatus(OrderStatus.PROCESSING);
             Order savedOrder = orderRepository.save(order);
@@ -286,27 +352,65 @@ public class OrderServiceImpl implements OrderService {
     public OrderResponseDTO cancelOrder(Long orderId, String currentUserId) {
         Order order = findOrder(orderId);
         order = expirePendingOrderIfNeeded(order);
-        if (!order.getBuyerId().equals(currentUserId) && !order.getSellerId().equals(currentUserId)) {
+        boolean isBuyer = order.getBuyerId().equals(currentUserId);
+        boolean isSeller = order.getSellerId().equals(currentUserId);
+        if (!isBuyer && !isSeller) {
             throw new OrderStateException("Only the buyer or seller can cancel this order");
         }
-        if (order.getStatus() != OrderStatus.PENDING) {
-            throw new OrderStateException("Only pending orders can be cancelled");
+        if (order.getStatus() == OrderStatus.PENDING) {
+            // both buyer and seller can cancel pending orders
+        } else if (order.getStatus() == OrderStatus.PROCESSING && isSeller) {
+            log.warn("Seller {} cancelling processing order {} with tracking code {}; manual carrier cancellation required",
+                    currentUserId, orderId, order.getTrackingCode());
+        } else {
+            throw new OrderStateException("Buyers can only cancel pending orders; sellers can cancel pending or processing orders");
         }
 
         order.setStatus(OrderStatus.CANCELLED);
         Order savedOrder = orderRepository.save(order);
-        log.info("Cancelled pending order {} by user {}", savedOrder.getId(), currentUserId);
+        publishAfterCommit(() -> paymentClient.refundDeposit(savedOrder.getId()));
+        log.info("Cancelled order {} by user {}", savedOrder.getId(), currentUserId);
         return toResponse(savedOrder);
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public OrderSummaryDTO getOrderSummary(Long orderId) {
+        Order order = findOrder(orderId);
+        return OrderSummaryDTO.builder()
+                .id(order.getId())
+                .sellerId(order.getSellerId())
+                .productId(order.getProductId())
+                .productAmount(resolveProductAmount(order, BigDecimal.ZERO))
+                .shippingFee(order.getShippingFee())
+                .platformFee(order.getPlatformFee())
+                .status(order.getStatus().name())
+                .sellerShippingFeePaid(order.isSellerShippingFeePaid())
+                .build();
+    }
+
+    @Override
+    public void markSellerShippingPaid(Long orderId) {
+        Order order = findOrder(orderId);
+        if (order.isSellerShippingFeePaid()) {
+            log.info("Order {} already flagged as platform-fee paid; skipping", orderId);
+            return;
+        }
+        order.setSellerShippingFeePaid(true);
+        orderRepository.save(order);
+        log.info("Flagged order {} as platform-fee paid", orderId);
     }
 
     private OrderResponseDTO markOrderCompleted(Order order) {
         order.setStatus(OrderStatus.COMPLETED);
+        order.setCompletedAt(LocalDateTime.now());
         Order savedOrder = orderRepository.save(order);
 
         OrderCompletedEvent event = OrderCompletedEvent.builder()
                 .productId(savedOrder.getProductId())
                 .build();
         publishAfterCommit(() -> orderEventPublisher.publishOrderCompleted(event));
+        publishAfterCommit(() -> paymentClient.settleDeposit(savedOrder.getId()));
 
         log.info("Completed order {} for product {}", savedOrder.getId(), savedOrder.getProductId());
         return toResponse(savedOrder);
@@ -314,11 +418,11 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<OrderResponseDTO> getOrdersForCurrentUser(String currentUserId) {
-        return orderRepository.findByBuyerIdOrSellerIdOrderByCreatedAtDescIdDesc(currentUserId, currentUserId)
-                .stream()
-                .map(this::toResponse)
-                .toList();
+    public PageResponseDTO<OrderResponseDTO> getOrdersForCurrentUser(String currentUserId, Pageable pageable) {
+        Page<OrderResponseDTO> page = orderRepository
+                .findByBuyerIdOrSellerIdOrderByCreatedAtDescIdDesc(currentUserId, currentUserId, pageable)
+                .map(this::toResponse);
+        return PageResponseDTO.from(page);
     }
 
     @Override
@@ -350,17 +454,25 @@ public class OrderServiceImpl implements OrderService {
     public OfferResponseDTO createOffer(CreateOfferRequestDTO request, String buyerId) {
         ProductResponseDTO product = productClient.getProduct(request.getProductId(), buyerId);
         validateProductCanBeOrdered(product, buyerId);
-        if (request.getDiscountPercent() > MAX_OFFER_DISCOUNT_PERCENT) {
-            throw new OrderStateException("Offer discount cannot exceed 30 percent");
+        if (!product.negotiable()) {
+            throw new OrderStateException("This product is not open to offers");
         }
         if (productOfferRepository.existsByProductIdAndBuyerIdAndStatusIn(product.id(), buyerId, ACTIVE_OFFER_STATUSES)) {
             throw new OrderStateException("Buyer already has an active offer for this product");
+        }
+        if (offerResubmitCooldownHours > 0
+                && productOfferRepository.existsByProductIdAndBuyerIdAndCreatedAtAfter(
+                        product.id(), buyerId, LocalDateTime.now().minusHours(offerResubmitCooldownHours))) {
+            throw new OrderStateException("You can only submit one offer per product per " + offerResubmitCooldownHours + " hour(s)");
         }
 
         int discountPercent = request.getDiscountPercent();
         BigDecimal offerPrice = product.price()
                 .multiply(BigDecimal.valueOf(100L - discountPercent))
                 .divide(BigDecimal.valueOf(100), 0, RoundingMode.HALF_UP);
+        if (product.minPrice() != null && offerPrice.compareTo(product.minPrice()) < 0) {
+            throw new OrderStateException("Offer price is below the seller's minimum acceptable price");
+        }
 
         ProductOffer offer = ProductOffer.builder()
                 .productId(product.id())
@@ -388,11 +500,11 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<OfferResponseDTO> getOffersForCurrentUser(String currentUserId) {
-        return productOfferRepository.findByBuyerIdOrSellerIdOrderByCreatedAtDescIdDesc(currentUserId, currentUserId)
-                .stream()
-                .map(this::toOfferResponse)
-                .toList();
+    public PageResponseDTO<OfferResponseDTO> getOffersForCurrentUser(String currentUserId, Pageable pageable) {
+        Page<OfferResponseDTO> page = productOfferRepository
+                .findByBuyerIdOrSellerIdOrderByCreatedAtDescIdDesc(currentUserId, currentUserId, pageable)
+                .map(this::toOfferResponse);
+        return PageResponseDTO.from(page);
     }
 
     @Override
@@ -405,12 +517,16 @@ public class OrderServiceImpl implements OrderService {
             throw new OrderStateException("Only pending offers can be accepted");
         }
 
-        offer.setStatus(OfferStatus.ACCEPTED);
-        ProductOffer savedOffer = productOfferRepository.save(offer);
-        OfferResponseDTO response = toOfferResponse(savedOffer);
-        publishAfterCommit(() -> notificationClient.sendOfferAcceptedNotification(response));
-        log.info("Accepted offer {} for product {}", savedOffer.getId(), savedOffer.getProductId());
-        return response;
+        try {
+            offer.setStatus(OfferStatus.ACCEPTED);
+            ProductOffer savedOffer = productOfferRepository.save(offer);
+            OfferResponseDTO response = toOfferResponse(savedOffer);
+            publishAfterCommit(() -> notificationClient.sendOfferAcceptedNotification(response));
+            log.info("Accepted offer {} for product {}", savedOffer.getId(), savedOffer.getProductId());
+            return response;
+        } catch (OptimisticLockingFailureException ex) {
+            throw new OrderStateException("This offer was just modified by another operation. Please refresh and try again.");
+        }
     }
 
     @Override
@@ -423,12 +539,16 @@ public class OrderServiceImpl implements OrderService {
             throw new OrderStateException("Only pending offers can be rejected");
         }
 
-        offer.setStatus(OfferStatus.REJECTED);
-        ProductOffer savedOffer = productOfferRepository.save(offer);
-        OfferResponseDTO response = toOfferResponse(savedOffer);
-        publishAfterCommit(() -> notificationClient.sendOfferRejectedNotification(response));
-        log.info("Rejected offer {} for product {}", savedOffer.getId(), savedOffer.getProductId());
-        return response;
+        try {
+            offer.setStatus(OfferStatus.REJECTED);
+            ProductOffer savedOffer = productOfferRepository.save(offer);
+            OfferResponseDTO response = toOfferResponse(savedOffer);
+            publishAfterCommit(() -> notificationClient.sendOfferRejectedNotification(response));
+            log.info("Rejected offer {} for product {}", savedOffer.getId(), savedOffer.getProductId());
+            return response;
+        } catch (OptimisticLockingFailureException ex) {
+            throw new OrderStateException("This offer was just modified by another operation. Please refresh and try again.");
+        }
     }
 
     @Override
@@ -468,7 +588,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     private boolean isOrderableStatus(String status) {
-        return APPROVED_STATUS.equalsIgnoreCase(status);
+        return APPROVED_STATUS.equalsIgnoreCase(status) || "ACTIVE".equalsIgnoreCase(status);
     }
 
     private void ensureProductHasNoActiveOrder(Long productId) {
@@ -499,6 +619,7 @@ public class OrderServiceImpl implements OrderService {
 
         order.setStatus(OrderStatus.CANCELLED);
         Order savedOrder = orderRepository.save(order);
+        publishAfterCommit(() -> paymentClient.refundDeposit(savedOrder.getId()));
         log.info("Cancelled expired pending order {}", savedOrder.getId());
         return savedOrder;
     }
@@ -509,18 +630,66 @@ public class OrderServiceImpl implements OrderService {
             return;
         }
         LocalDateTime expiredBefore = LocalDateTime.now().minusMinutes(pendingTimeoutMinutes);
-        int cancelledCount = orderRepository.cancelExpiredPendingOrders(expiredBefore);
-        if (cancelledCount > 0) {
-            log.info("Cancelled {} expired pending orders", cancelledCount);
+        List<Order> expiredOrders = orderRepository.findPendingOrdersExpiredBefore(expiredBefore);
+        if (expiredOrders.isEmpty()) {
+            return;
         }
+        expiredOrders.forEach(order -> order.setStatus(OrderStatus.CANCELLED));
+        List<Order> saved = orderRepository.saveAll(expiredOrders);
+        saved.forEach(order -> {
+            OrderResponseDTO response = toResponse(order);
+            publishAfterCommit(() -> notificationClient.sendOrderCancelledNotification(response));
+            publishAfterCommit(() -> paymentClient.refundDeposit(order.getId()));
+        });
+        log.info("Cancelled {} expired pending orders", saved.size());
     }
 
     @Scheduled(fixedDelayString = "${offers.expiration-scan-ms:300000}")
     public void expirePendingOffers() {
-        int expiredCount = productOfferRepository.expirePendingOffers(LocalDateTime.now());
-        if (expiredCount > 0) {
-            log.info("Expired {} pending product offers", expiredCount);
+        List<ProductOffer> expiredOffers = productOfferRepository.findPendingExpiredOffers(LocalDateTime.now());
+        if (expiredOffers.isEmpty()) {
+            return;
         }
+        expiredOffers.forEach(offer -> offer.setStatus(OfferStatus.EXPIRED));
+        List<ProductOffer> saved = productOfferRepository.saveAll(expiredOffers);
+        saved.forEach(offer -> {
+            OfferResponseDTO response = toOfferResponse(offer);
+            publishAfterCommit(() -> notificationClient.sendOfferExpiredNotification(response));
+        });
+        log.info("Expired {} pending product offers", saved.size());
+    }
+
+    /**
+     * Auto-approves return requests where the seller has not responded within the timeout period.
+     * After seller auto-approval, admin must still approve for the return to be finalized.
+     */
+    @Scheduled(fixedDelayString = "${orders.return-timeout-scan-ms:3600000}")
+    public void autoApproveTimedOutReturnRequests() {
+        if (returnApprovalTimeoutHours <= 0) {
+            return;
+        }
+        LocalDateTime timeoutBefore = LocalDateTime.now().minusHours(returnApprovalTimeoutHours);
+        List<Order> timedOutReturns = orderRepository.findReturnRequestsPendingSellerApproval(timeoutBefore);
+        if (timedOutReturns.isEmpty()) {
+            return;
+        }
+
+        for (Order order : timedOutReturns) {
+            order.setReturnSellerApproved(true);
+            Order saved = orderRepository.save(order);
+            log.warn("Auto-approved return request for order {} after seller did not respond within  hours",
+                    saved.getId(), returnApprovalTimeoutHours);
+            // Check if both seller and admin have now approved
+            if (saved.isReturnAdminApproved()) {
+                // Finalize the return
+                saved.setStatus(OrderStatus.RETURNED);
+                orderRepository.save(saved);
+                publishAfterCommit(() -> paymentClient.refundDeposit(saved.getId()));
+                log.info("Return finalized for order {} after auto-approval", saved.getId());
+            }
+        }
+
+        log.info("Auto-approved {} timed-out return requests", timedOutReturns.size());
     }
 
     private Order findOrder(Long orderId) {
@@ -537,8 +706,14 @@ public class OrderServiceImpl implements OrderService {
         if (offer.getStatus() == OfferStatus.PENDING
                 && offer.getExpiresAt() != null
                 && offer.getExpiresAt().isBefore(LocalDateTime.now())) {
-            offer.setStatus(OfferStatus.EXPIRED);
-            return productOfferRepository.save(offer);
+            try {
+                offer.setStatus(OfferStatus.EXPIRED);
+                return productOfferRepository.save(offer);
+            } catch (OptimisticLockingFailureException ex) {
+                // Another thread already expired or modified this offer; refetch to get latest state
+                return productOfferRepository.findById(offer.getId())
+                        .orElseThrow(() -> new OrderStateException("Offer was not found"));
+            }
         }
         return offer;
     }
@@ -621,18 +796,226 @@ public class OrderServiceImpl implements OrderService {
         });
     }
 
+    @Override
+    @Transactional(readOnly = true)
+    public PageResponseDTO<OrderResponseDTO> listAllOrdersForAdmin(String status, Pageable pageable) {
+        OrderStatus orderStatus = (status != null && !status.isBlank()) ? OrderStatus.valueOf(status.toUpperCase()) : null;
+        Page<OrderResponseDTO> page = orderRepository.findAllForAdmin(orderStatus, pageable).map(this::toResponse);
+        return PageResponseDTO.from(page);
+    }
+
+    @Override
+    public OrderResponseDTO adminCancelOrder(Long orderId) {
+        Order order = findOrder(orderId);
+        if (order.getStatus() == OrderStatus.COMPLETED || order.getStatus() == OrderStatus.CANCELLED) {
+            throw new OrderStateException("Only pending or processing orders can be admin-cancelled");
+        }
+        order.setStatus(OrderStatus.CANCELLED);
+        Order savedOrder = orderRepository.save(order);
+        OrderResponseDTO response = toResponse(savedOrder);
+        publishAfterCommit(() -> notificationClient.sendOrderCancelledNotification(response));
+        publishAfterCommit(() -> paymentClient.refundDeposit(savedOrder.getId()));
+        log.info("Admin cancelled order {}", savedOrder.getId());
+        return response;
+    }
+
+    @Override
+    public OrderResponseDTO requestReturn(Long orderId, String buyerId, String reason, List<MultipartFile> returnEvidenceImages) {
+        Order order = findOrder(orderId);
+        if (!order.getBuyerId().equals(buyerId)) {
+            throw new OrderStateException("Only the buyer can request a return for this order");
+        }
+        if (order.getStatus() != OrderStatus.COMPLETED) {
+            throw new OrderStateException("Only completed orders can be returned");
+        }
+        LocalDateTime completedAt = order.getCompletedAt() != null ? order.getCompletedAt() : order.getUpdatedAt();
+        if (returnWindowDays > 0 && completedAt != null
+                && completedAt.isBefore(LocalDateTime.now().minusDays(returnWindowDays))) {
+            throw new OrderStateException("The " + returnWindowDays + "-day return window has expired");
+        }
+
+        // Return evidence images are required and validated
+        List<MultipartFile> normalizedReturnImages = normalizeImages(returnEvidenceImages);
+        fileValidator.validateImages(normalizedReturnImages); // Add validation
+        List<String> returnEvidenceUrls = saveUploadedFiles(normalizedReturnImages);
+
+        order.setStatus(OrderStatus.RETURN_REQUESTED);
+        order.setReturnReason(reason);
+        order.setReturnRequestedAt(LocalDateTime.now());
+        order.setReturnSellerApproved(false);
+        order.setReturnAdminApproved(false);
+        order.setReturnRejectReason(null);
+        order.setReturnEvidenceImages(writeJson(returnEvidenceUrls));
+        Order saved = orderRepository.save(order);
+        log.info("Return requested for order {} by buyer {} with {} evidence images", saved.getId(), buyerId, returnEvidenceUrls.size());
+        return toResponse(saved);
+    }
+
+    @Override
+    public OrderResponseDTO sellerApproveReturn(Long orderId, String sellerId) {
+        Order order = requireReturnRequested(orderId);
+        if (!order.getSellerId().equals(sellerId)) {
+            throw new OrderStateException("Only the seller can approve this return");
+        }
+        order.setReturnSellerApproved(true);
+        return finalizeOrAwaitReturn(order, "seller");
+    }
+
+    @Override
+    public OrderResponseDTO adminApproveReturn(Long orderId) {
+        Order order = requireReturnRequested(orderId);
+        order.setReturnAdminApproved(true);
+        return finalizeOrAwaitReturn(order, "admin");
+    }
+
+    @Override
+    public OrderResponseDTO sellerRejectReturn(Long orderId, String sellerId, String reason) {
+        Order order = requireReturnRequested(orderId);
+        if (!order.getSellerId().equals(sellerId)) {
+            throw new OrderStateException("Only the seller can reject this return");
+        }
+        return doRejectReturn(order, reason, "seller");
+    }
+
+    @Override
+    public OrderResponseDTO adminRejectReturn(Long orderId, String reason) {
+        Order order = requireReturnRequested(orderId);
+        return doRejectReturn(order, reason, "admin");
+    }
+
+    private Order requireReturnRequested(Long orderId) {
+        Order order = findOrder(orderId);
+        if (order.getStatus() != OrderStatus.RETURN_REQUESTED) {
+            throw new OrderStateException("Order is not awaiting return approval");
+        }
+        return order;
+    }
+
+    /** Finalizes the return only when BOTH seller and admin have approved; otherwise waits for the other party. */
+    private OrderResponseDTO finalizeOrAwaitReturn(Order order, String approver) {
+        if (order.isReturnSellerApproved() && order.isReturnAdminApproved()) {
+            order.setStatus(OrderStatus.RETURNED);
+            Order saved = orderRepository.save(order);
+            // Deposit refunded (marked); product stays SOLD — seller must re-list manually.
+            publishAfterCommit(() -> paymentClient.refundDeposit(saved.getId()));
+            log.info("Return finalized for order {} after {} approval (both parties approved)", saved.getId(), approver);
+            return toResponse(saved);
+        }
+        Order saved = orderRepository.save(order);
+        log.info("Return for order {} approved by {}; awaiting the other party", saved.getId(), approver);
+        return toResponse(saved);
+    }
+
+    private OrderResponseDTO doRejectReturn(Order order, String reason, String rejecter) {
+        order.setStatus(OrderStatus.COMPLETED);
+        order.setReturnRejectReason(reason);
+        order.setReturnSellerApproved(false);
+        order.setReturnAdminApproved(false);
+        Order saved = orderRepository.save(order);
+        log.info("Return for order {} rejected by {}", saved.getId(), rejecter);
+        return toResponse(saved);
+    }
+
+    private List<MultipartFile> normalizeImages(List<MultipartFile> images) {
+        if (images == null || images.isEmpty()) {
+            throw new OrderStateException("At least one evidence image is required");
+        }
+        List<MultipartFile> normalized = images.stream()
+                .filter(file -> file != null && !file.isEmpty())
+                .toList();
+        if (normalized.isEmpty()) {
+            throw new OrderStateException("At least one evidence image is required");
+        }
+        return normalized;
+    }
+
+    private List<String> saveUploadedFiles(List<MultipartFile> files) {
+        List<String> relativeUrls = new ArrayList<>(files.size());
+        for (MultipartFile file : files) {
+            relativeUrls.add(saveUploadedFile(file));
+        }
+        return relativeUrls;
+    }
+
+    private String saveUploadedFile(MultipartFile file) {
+        String originalFilename = StringUtils.hasText(file.getOriginalFilename())
+                ? file.getOriginalFilename().trim()
+                : "evidence.jpg";
+        String extension = "";
+        int lastDotIndex = originalFilename.lastIndexOf('.');
+        if (lastDotIndex >= 0) {
+            extension = originalFilename.substring(lastDotIndex);
+        }
+        String storedFilename = UUID.randomUUID() + extension;
+        Path uploadDir = Paths.get(storageProperties.uploadDir()).toAbsolutePath().normalize();
+        Path targetPath = uploadDir.resolve(storedFilename);
+        try {
+            Files.createDirectories(uploadDir);
+            try (InputStream inputStream = file.getInputStream()) {
+                Files.copy(inputStream, targetPath, StandardCopyOption.REPLACE_EXISTING);
+            }
+        } catch (IOException exception) {
+            throw new ShippingProviderUnavailableException("Unable to store evidence image", exception);
+        }
+        return "api/v1/orders/media/" + storedFilename;
+    }
+
+    private String writeJson(List<String> urls) {
+        try {
+            return objectMapper.writeValueAsString(urls);
+        } catch (RuntimeException | com.fasterxml.jackson.core.JsonProcessingException exception) {
+            return "[]";
+        }
+    }
+
+    private List<String> toAbsoluteEvidenceUrls(String json) {
+        if (!StringUtils.hasText(json)) {
+            return Collections.emptyList();
+        }
+        List<String> relative;
+        try {
+            relative = objectMapper.readValue(json, new TypeReference<List<String>>() {
+            });
+        } catch (IOException exception) {
+            return Collections.emptyList();
+        }
+        String base = applicationProperties.publicBaseUrl();
+        return relative.stream().map(url -> toAbsoluteUrl(base, url)).toList();
+    }
+
+    private String toAbsoluteUrl(String base, String url) {
+        if (!StringUtils.hasText(url) || url.startsWith("http://") || url.startsWith("https://") || !StringUtils.hasText(base)) {
+            return url;
+        }
+        String normalizedBase = base.endsWith("/") ? base.substring(0, base.length() - 1) : base;
+        String normalizedPath = url.startsWith("/") ? url : "/" + url;
+        return normalizedBase + normalizedPath;
+    }
+
     private OrderResponseDTO toResponse(Order order) {
         return OrderResponseDTO.builder()
                 .id(order.getId())
                 .buyerId(order.getBuyerId())
                 .sellerId(order.getSellerId())
                 .productId(order.getProductId())
+                .productTitle(order.getProductTitle())
+                .productImageUrl(order.getProductImageUrl())
                 .amount(order.getAmount())
                 .productAmount(resolveProductAmount(order, BigDecimal.ZERO))
                 .shippingFee(order.getShippingFee())
+                .platformFee(order.getPlatformFee())
+                .sellerShippingFeePaid(order.isSellerShippingFeePaid())
                 .trackingCode(order.getTrackingCode())
                 .deliveryMethod(order.getDeliveryMethod())
                 .status(order.getStatus())
+                .completedAt(order.getCompletedAt())
+                .returnReason(order.getReturnReason())
+                .returnRequestedAt(order.getReturnRequestedAt())
+                .returnSellerApproved(order.isReturnSellerApproved())
+                .returnAdminApproved(order.isReturnAdminApproved())
+                .returnRejectReason(order.getReturnRejectReason())
+                .evidenceImages(toAbsoluteEvidenceUrls(order.getEvidenceImages()))
+                .returnEvidenceImages(toAbsoluteEvidenceUrls(order.getReturnEvidenceImages()))
                 .createdAt(order.getCreatedAt())
                 .updatedAt(order.getUpdatedAt())
                 .build();

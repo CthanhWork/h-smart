@@ -22,4 +22,13 @@ public class ProductSearchEventListener {
             log.info("Processed product search index event for product {}", event.getId());
         }
     }
+
+    @RabbitListener(queues = ProductRabbitMqConfig.PRODUCT_SEARCH_DELETE_QUEUE)
+    public void handleProductDeleteEvent(ProductSearchEvent event) {
+        if (event == null) {
+            return;
+        }
+        productSearchService.deleteProduct(event.getId());
+        log.info("Processed product search delete event for product {}", event.getId());
+    }
 }

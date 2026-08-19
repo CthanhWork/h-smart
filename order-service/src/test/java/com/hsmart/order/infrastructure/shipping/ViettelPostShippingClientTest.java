@@ -12,6 +12,7 @@ import com.hsmart.order.application.dto.GhtkShipmentRequestDTO;
 import com.hsmart.order.application.dto.UserAddressResponseDTO;
 import com.hsmart.order.application.exceptions.ShippingProviderUnavailableException;
 import com.hsmart.order.infrastructure.config.ViettelPostProperties;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.math.BigDecimal;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpMethod;
@@ -25,7 +26,7 @@ class ViettelPostShippingClientTest {
     void calculateShippingFeeShouldLoginAndParseMoneyTotal() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://partner2.viettelpost.vn");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        ViettelPostShippingClient client = new ViettelPostShippingClient(builder.build(), properties());
+        ViettelPostShippingClient client = new ViettelPostShippingClient(builder.build(), properties(), new ObjectMapper());
 
         expectLogin(server);
         server.expect(requestTo("https://partner2.viettelpost.vn/v2/order/getPriceNlp"))
@@ -37,8 +38,18 @@ class ViettelPostShippingClientTest {
                           "PRODUCT_PRICE": 0,
                           "MONEY_COLLECTION": 0,
                           "ORDER_SERVICE": "VCN",
+                          "SENDER_FULLNAME": "seller-one",
+                          "SENDER_PHONE": "0901234567",
                           "SENDER_ADDRESS": "1 Example Street, Ward 1, District 1, Ho Chi Minh City",
+                          "SENDER_PROVINCE": "79",
+                          "SENDER_DISTRICT": "760",
+                          "SENDER_WARD": "26734",
+                          "RECEIVER_FULLNAME": "buyer-one",
+                          "RECEIVER_PHONE": "0901234567",
                           "RECEIVER_ADDRESS": "2 Buyer Street, Ward 2, Thu Duc City, Ho Chi Minh City",
+                          "RECEIVER_PROVINCE": "79",
+                          "RECEIVER_DISTRICT": "760",
+                          "RECEIVER_WARD": "26734",
                           "PRODUCT_TYPE": "HH",
                           "NATIONAL_TYPE": 1
                         }
@@ -58,10 +69,34 @@ class ViettelPostShippingClientTest {
     }
 
     @Test
+    void calculateShippingFeeShouldFallbackToMoneyTotalFee() {
+        RestClient.Builder builder = RestClient.builder().baseUrl("https://partner2.viettelpost.vn");
+        MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
+        ViettelPostShippingClient client = new ViettelPostShippingClient(builder.build(), properties(), new ObjectMapper());
+
+        expectLogin(server);
+        server.expect(requestTo("https://partner2.viettelpost.vn/v2/order/getPriceNlp"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("Token", "viettel-token"))
+                .andRespond(withSuccess(
+                        "{\"status\":200,\"data\":{\"MONEY_TOTAL_FEE\":27000}}",
+                        MediaType.APPLICATION_JSON
+                ));
+
+        BigDecimal fee = client.calculateShippingFee(
+                address("seller-one", "District 1", "Ward 1", "1 Example Street"),
+                address("buyer-one", "Thu Duc City", "Ward 2", "2 Buyer Street")
+        );
+
+        assertThat(fee).isEqualByComparingTo("27000");
+        server.verify();
+    }
+
+    @Test
     void createShipmentShouldLoginAndReturnOrderNumber() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://partner2.viettelpost.vn");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        ViettelPostShippingClient client = new ViettelPostShippingClient(builder.build(), properties());
+        ViettelPostShippingClient client = new ViettelPostShippingClient(builder.build(), properties(), new ObjectMapper());
 
         expectLogin(server);
         server.expect(requestTo("https://partner2.viettelpost.vn/v2/order/createOrderNlp"))
@@ -73,9 +108,15 @@ class ViettelPostShippingClientTest {
                           "SENDER_FULLNAME": "seller-one",
                           "SENDER_ADDRESS": "1 Example Street, Ward 1, District 1, Ho Chi Minh City",
                           "SENDER_PHONE": "0901234567",
+                          "SENDER_PROVINCE": "79",
+                          "SENDER_DISTRICT": "760",
+                          "SENDER_WARD": "26734",
                           "RECEIVER_FULLNAME": "buyer-one",
                           "RECEIVER_ADDRESS": "2 Buyer Street, Ward 2, Thu Duc City, Ho Chi Minh City",
                           "RECEIVER_PHONE": "0901234567",
+                          "RECEIVER_PROVINCE": "79",
+                          "RECEIVER_DISTRICT": "760",
+                          "RECEIVER_WARD": "26734",
                           "PRODUCT_NAME": "Rice cooker",
                           "PRODUCT_QUANTITY": 1,
                           "PRODUCT_PRICE": 100000,
@@ -122,7 +163,8 @@ class ViettelPostShippingClientTest {
                         "HH",
                         3,
                         true
-                )
+                ),
+                new ObjectMapper()
         );
 
         assertThatThrownBy(() -> client.createShipment(new GhtkShipmentRequestDTO(
@@ -141,7 +183,7 @@ class ViettelPostShippingClientTest {
     void calculateShippingFeeShouldWrapProviderResponseWithoutFee() {
         RestClient.Builder builder = RestClient.builder().baseUrl("https://partner2.viettelpost.vn");
         MockRestServiceServer server = MockRestServiceServer.bindTo(builder).build();
-        ViettelPostShippingClient client = new ViettelPostShippingClient(builder.build(), properties());
+        ViettelPostShippingClient client = new ViettelPostShippingClient(builder.build(), properties(), new ObjectMapper());
 
         expectLogin(server);
         server.expect(requestTo("https://partner2.viettelpost.vn/v2/order/getPriceNlp"))
@@ -180,8 +222,11 @@ class ViettelPostShippingClientTest {
                 userId,
                 userId,
                 "0901234567",
+                "79",
                 "Ho Chi Minh City",
+                "760",
                 district,
+                "26734",
                 ward,
                 streetDetail
         );

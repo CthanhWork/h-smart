@@ -41,6 +41,11 @@ interaction-service:
   connect-timeout-ms: ${INTERACTION_SERVICE_CONNECT_TIMEOUT_MS:2000}
   read-timeout-ms: ${INTERACTION_SERVICE_READ_TIMEOUT_MS:3000}
 
+payment-service:
+  base-url: ${PAYMENT_SERVICE_BASE_URL:http://payment-service}
+  connect-timeout-ms: ${PAYMENT_SERVICE_CONNECT_TIMEOUT_MS:2000}
+  read-timeout-ms: ${PAYMENT_SERVICE_READ_TIMEOUT_MS:3000}
+
 ghtk:
   api-url: ${GHTK_API_URL:https://services.giaohangtietkiem.vn}
   api-token: ${GHTK_API_TOKEN:}
@@ -66,6 +71,24 @@ viettel-post:
 orders:
   pending-timeout-minutes: ${ORDER_PENDING_TIMEOUT_MINUTES:30}
   pending-timeout-scan-ms: ${ORDER_PENDING_TIMEOUT_SCAN_MS:60000}
+  return-window-days: ${ORDER_RETURN_WINDOW_DAYS:3}
+  return-approval-timeout-hours: ${ORDER_RETURN_APPROVAL_TIMEOUT_HOURS:48}
+  return-timeout-scan-ms: ${ORDER_RETURN_TIMEOUT_SCAN_MS:3600000}
+
+app:
+  public-base-url: ${APP_PUBLIC_BASE_URL:http://localhost:8000}
+
+storage:
+  upload-dir: ${STORAGE_UPLOAD_DIR:uploads}
+
+offers:
+  expiration-scan-ms: ${OFFERS_EXPIRATION_SCAN_MS:300000}
+  resubmit-cooldown-hours: ${OFFERS_RESUBMIT_COOLDOWN_HOURS:1}
+
+platform:
+  fee:
+    # Platform fee charged to the seller = min(shippingFee, productAmount * max-rate).
+    max-rate: ${PLATFORM_FEE_MAX_RATE:0.10}
 
 internal:
   security:

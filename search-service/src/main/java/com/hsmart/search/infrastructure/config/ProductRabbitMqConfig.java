@@ -19,8 +19,10 @@ public class ProductRabbitMqConfig {
 
     public static final String PRODUCT_EXCHANGE = "product.exchange";
     public static final String PRODUCT_SEARCH_INDEX_QUEUE = "product.search.index.queue";
+    public static final String PRODUCT_SEARCH_DELETE_QUEUE = "product.search.delete.queue";
     public static final String PRODUCT_CREATED_ROUTING_KEY = "product.event.created";
     public static final String PRODUCT_UPDATED_ROUTING_KEY = "product.event.updated";
+    public static final String PRODUCT_DELETED_ROUTING_KEY = "product.event.deleted";
 
     @Bean
     public TopicExchange productExchange() {
@@ -44,6 +46,18 @@ public class ProductRabbitMqConfig {
         return BindingBuilder.bind(productSearchIndexQueue)
                 .to(productExchange)
                 .with(PRODUCT_UPDATED_ROUTING_KEY);
+    }
+
+    @Bean
+    public Queue productSearchDeleteQueue() {
+        return QueueBuilder.durable(PRODUCT_SEARCH_DELETE_QUEUE).build();
+    }
+
+    @Bean
+    public Binding productDeletedSearchBinding(Queue productSearchDeleteQueue, TopicExchange productExchange) {
+        return BindingBuilder.bind(productSearchDeleteQueue)
+                .to(productExchange)
+                .with(PRODUCT_DELETED_ROUTING_KEY);
     }
 
     @Bean

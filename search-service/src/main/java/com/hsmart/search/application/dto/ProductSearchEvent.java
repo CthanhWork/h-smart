@@ -22,6 +22,9 @@ public class ProductSearchEvent {
     private String categoryName;
     private String status;
     private String sellerId;
+    private String provinceCode;
+    private String province;
+    private String imageUrl;
 
     @Builder.Default
     private List<Object> aiMetadata = new ArrayList<>();

@@ -6,6 +6,7 @@ import com.hsmart.backend.application.dto.AssistantChatMessage;
 import com.hsmart.backend.application.dto.IntentClassification;
 import com.hsmart.backend.application.dto.IntentClassification.Intent;
 import com.hsmart.backend.infrastructure.config.AssistantProperties;
+import com.hsmart.backend.infrastructure.config.IntentClassifierProperties;
 import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import io.github.resilience4j.circuitbreaker.CallNotPermittedException;
@@ -33,24 +34,37 @@ public class IntentClassifier {
     private static final String USER_ROLE = "user";
     private static final String SYSTEM_PROMPT = """
             You are the strict intent classifier for H-Smart.
+            You classify only H-Smart buying and selling assistant requests.
             Return only valid JSON. Do not return Markdown, code fences, XML, explanations, or extra text.
             The JSON format must be exactly: {"intent":"SYSTEM|POLICY|GENERAL","reason":"..."}.
             The reason must be concise English text, maximum 120 characters.
 
             Intent definitions:
-            SYSTEM: The user wants to look up orders, account information, profile information, trust score, review count, or other private H-Smart system data.
-            POLICY: The user asks about H-Smart policies, return/refund rules, buying or selling instructions, FAQ-style guidance, or platform usage rules.
-            GENERAL: The user is chatting casually or asking broad product advice that does not require private system data or policy lookup.
+            SYSTEM: The user explicitly wants to look up their latest or recent H-Smart order and its current status.
+            POLICY: The user asks how to use H-Smart, including account setup, email verification, password reset, listing, offers, checkout, shipping, cancellation, reviews, or marketplace rules.
+            GENERAL: The user asks for product discovery, product comparison, buying or selling guidance, or any other request that does not require private system data or policy lookup.
 
+            Important boundaries:
+            - Do not choose SYSTEM for general instructions such as "how do I track an order?" or "how do offers work?"; choose POLICY.
+            - Do not choose SYSTEM for private data that the assistant cannot currently retrieve, such as account verification state, trust score, or a specific offer status; choose POLICY so the assistant can explain where to check it without inventing data.
+            - Choose SYSTEM only when the user asks about their own latest/recent order.
+
+            Examples:
+            User: "Làm sao đăng ký tài khoản?" -> POLICY
+            User: "Tôi trả giá thế nào?" -> POLICY
+            User: "Đơn hàng gần nhất của tôi đang ở đâu?" -> SYSTEM
+            User: "Email của tôi xác minh chưa?" -> POLICY
+            User: "Tìm giúp tôi một chiếc tủ lạnh" -> GENERAL
+
+            If the request is unrelated to H-Smart buying or selling, choose GENERAL.
             If the request is ambiguous, choose GENERAL.
             """;
-    private static final IntentClassification FALLBACK_CLASSIFICATION =
-            IntentClassification.general("Intent classifier is unavailable");
     private static final String CHAT_COMPLETIONS_PATH = "/chat/completions";
 
     @Qualifier("intentClassifierRestClient")
     private final RestClient intentClassifierRestClient;
     private final AssistantProperties assistantProperties;
+    private final IntentClassifierProperties intentClassifierProperties;
     private final CircuitBreakerRegistry circuitBreakerRegistry;
     private final ObjectMapper objectMapper;
     private final Tracer tracer;
@@ -73,12 +87,38 @@ public class IntentClassifier {
             return classification;
         } catch (CallNotPermittedException exception) {
             log.warn("Intent classifier circuit breaker is open with traceId {}", currentTraceId());
-            return FALLBACK_CLASSIFICATION;
+            return classifyWithLocalFallback(normalizedQuestion);
         } catch (RuntimeException exception) {
             log.warn("Intent classification failed with traceId {}. Reason: {}",
                     currentTraceId(), exception.getClass().getSimpleName());
-            return FALLBACK_CLASSIFICATION;
+            return classifyWithLocalFallback(normalizedQuestion);
         }
+    }
+
+    private IntentClassification classifyWithLocalFallback(String question) {
+        String normalized = question.toLowerCase(Locale.ROOT);
+        if (containsAny(normalized,
+                "đơn hàng gần nhất", "đơn gần nhất", "đơn của tôi", "don hang gan nhat",
+                "don gan nhat", "don cua toi", "latest order", "my order")) {
+            return new IntentClassification(Intent.SYSTEM, "Local fallback: latest order lookup");
+        }
+        if (containsAny(normalized,
+                "đăng ký", "dang ky", "xác minh", "xac minh", "đăng nhập", "dang nhap",
+                "mật khẩu", "mat khau", "đăng bán", "dang ban", "đăng tin", "dang tin",
+                "trả giá", "tra gia", "offer", "vận chuyển", "van chuyen", "giao hàng", "giao hang",
+                "huỷ đơn", "hủy đơn", "huy don", "đánh giá", "danh gia", "chính sách", "chinh sach")) {
+            return new IntentClassification(Intent.POLICY, "Local fallback: platform guidance");
+        }
+        return IntentClassification.general("Intent classifier is unavailable");
+    }
+
+    private boolean containsAny(String value, String... candidates) {
+        for (String candidate : candidates) {
+            if (value.contains(candidate)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private IntentClassification classifyWithAiProvider(String userQuestion) {
@@ -86,8 +126,12 @@ public class IntentClassifier {
             throw new IllegalStateException("Intent classifier AI provider configuration is incomplete");
         }
 
+        String classifierModel = StringUtils.hasText(intentClassifierProperties.model())
+                ? intentClassifierProperties.model()
+                : assistantProperties.model();
+
         ChatCompletionRequest request = new ChatCompletionRequest(
-                assistantProperties.model(),
+                classifierModel,
                 List.of(
                         new AssistantChatMessage(SYSTEM_ROLE, SYSTEM_PROMPT),
                         new AssistantChatMessage(USER_ROLE, userQuestion)

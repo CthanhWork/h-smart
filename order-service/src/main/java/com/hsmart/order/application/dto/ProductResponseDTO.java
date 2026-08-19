@@ -11,6 +11,8 @@ public record ProductResponseDTO(
         String sellerId,
         Long categoryId,
         String categoryName,
-        String imageUrl
+        String imageUrl,
+        boolean negotiable,
+        BigDecimal minPrice
 ) {
 }

@@ -1,6 +1,7 @@
 package com.hsmart.order.infrastructure.shipping;
 
 import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hsmart.order.application.dto.GhtkShipmentRequestDTO;
 import com.hsmart.order.application.dto.UserAddressResponseDTO;
 import com.hsmart.order.application.exceptions.ShippingProviderUnavailableException;
@@ -26,13 +27,16 @@ public class ViettelPostShippingClient implements ViettelPostClient {
 
     private final RestClient viettelPostRestClient;
     private final ViettelPostProperties properties;
+    private final ObjectMapper objectMapper;
 
     public ViettelPostShippingClient(
             @Qualifier("viettelPostRestClient") RestClient viettelPostRestClient,
-            ViettelPostProperties properties
+            ViettelPostProperties properties,
+            ObjectMapper objectMapper
     ) {
         this.viettelPostRestClient = viettelPostRestClient;
         this.properties = properties;
+        this.objectMapper = objectMapper;
     }
 
     @Override
@@ -42,14 +46,25 @@ public class ViettelPostShippingClient implements ViettelPostClient {
         validateRequiredAddress(buyerAddress, "buyer");
 
         try {
-            JsonNode response = viettelPostRestClient.post()
+            String responseBody = viettelPostRestClient.post()
                     .uri("/v2/order/getPriceNlp")
                     .header(TOKEN_HEADER, getToken())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(toPriceRequest(sellerAddress, buyerAddress, BigDecimal.ZERO))
                     .retrieve()
-                    .body(JsonNode.class);
-            return readMoney(response, "MONEY_TOTAL", "PRICE", "TOTAL", "MONEY_COLLECTION");
+                    .body(String.class);
+            JsonNode response = parseJsonResponse(responseBody, "shipping fee calculation");
+            return readMoney(
+                    response,
+                    "MONEY_TOTAL",
+                    "MONEY_TOTAL_FEE",
+                    "MONEY_TOTAL_OLD",
+                    "MONEY_FEE",
+                    "MONEY_COLLECTION_FEE",
+                    "PRICE",
+                    "TOTAL",
+                    "MONEY_COLLECTION"
+            );
         } catch (RestClientException | IllegalArgumentException exception) {
             log.warn("Viettel Post shipping fee calculation failed", exception);
             throw new ShippingProviderUnavailableException("Viettel Post shipping fee calculation failed", exception);
@@ -62,13 +77,14 @@ public class ViettelPostShippingClient implements ViettelPostClient {
         validateShipmentRequest(request);
 
         try {
-            JsonNode response = viettelPostRestClient.post()
+            String responseBody = viettelPostRestClient.post()
                     .uri("/v2/order/createOrderNlp")
                     .header(TOKEN_HEADER, getToken())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(toCreateOrderRequest(request))
                     .retrieve()
-                    .body(JsonNode.class);
+                    .body(String.class);
+            JsonNode response = parseJsonResponse(responseBody, "shipment creation");
 
             String trackingCode = readText(response, "ORDER_NUMBER", "ORDER_CODE", "TRACKING_CODE", "ORDER_ID");
             if (StringUtils.hasText(trackingCode)) {
@@ -82,7 +98,7 @@ public class ViettelPostShippingClient implements ViettelPostClient {
     }
 
     private String getToken() {
-        JsonNode response = viettelPostRestClient.post()
+        String responseBody = viettelPostRestClient.post()
                 .uri("/v2/user/Login")
                 .contentType(MediaType.APPLICATION_JSON)
                 .body(Map.of(
@@ -90,7 +106,8 @@ public class ViettelPostShippingClient implements ViettelPostClient {
                         "PASSWORD", properties.password()
                 ))
                 .retrieve()
-                .body(JsonNode.class);
+                .body(String.class);
+        JsonNode response = parseJsonResponse(responseBody, "login");
 
         String token = readText(response, "TOKEN", "Token", "token");
         if (!StringUtils.hasText(token)) {
@@ -110,8 +127,14 @@ public class ViettelPostShippingClient implements ViettelPostClient {
         body.put("MONEY_COLLECTION", codAmount);
         body.put("ORDER_SERVICE", properties.serviceCode());
         body.put("ORDER_SERVICE_ADD", properties.serviceExtra());
+        body.put("SENDER_FULLNAME", contactName(sellerAddress));
+        body.put("SENDER_PHONE", sellerAddress.phoneNumber());
         body.put("SENDER_ADDRESS", fullAddress(sellerAddress));
+        putLocationFields(body, "SENDER", sellerAddress);
+        body.put("RECEIVER_FULLNAME", contactName(buyerAddress));
+        body.put("RECEIVER_PHONE", buyerAddress.phoneNumber());
         body.put("RECEIVER_ADDRESS", fullAddress(buyerAddress));
+        putLocationFields(body, "RECEIVER", buyerAddress);
         body.put("PRODUCT_LENGTH", 0);
         body.put("PRODUCT_WIDTH", 0);
         body.put("PRODUCT_HEIGHT", 0);
@@ -135,9 +158,11 @@ public class ViettelPostShippingClient implements ViettelPostClient {
         body.put("SENDER_FULLNAME", contactName(seller));
         body.put("SENDER_ADDRESS", fullAddress(seller));
         body.put("SENDER_PHONE", seller.phoneNumber());
+        putLocationFields(body, "SENDER", seller);
         body.put("RECEIVER_FULLNAME", contactName(buyer));
         body.put("RECEIVER_ADDRESS", fullAddress(buyer));
         body.put("RECEIVER_PHONE", buyer.phoneNumber());
+        putLocationFields(body, "RECEIVER", buyer);
         body.put("PRODUCT_NAME", request.productName());
         body.put("PRODUCT_QUANTITY", 1);
         body.put("PRODUCT_PRICE", request.productValue());
@@ -158,6 +183,18 @@ public class ViettelPostShippingClient implements ViettelPostClient {
         return body;
     }
 
+    private void putLocationFields(Map<String, Object> body, String prefix, UserAddressResponseDTO address) {
+        putIfHasText(body, prefix + "_PROVINCE", address.provinceCode());
+        putIfHasText(body, prefix + "_DISTRICT", address.districtCode());
+        putIfHasText(body, prefix + "_WARD", address.wardCode());
+    }
+
+    private void putIfHasText(Map<String, Object> body, String key, String value) {
+        if (StringUtils.hasText(value)) {
+            body.put(key, value.trim());
+        }
+    }
+
     private BigDecimal readMoney(JsonNode response, String... fieldNames) {
         String value = readText(response, fieldNames);
         if (!StringUtils.hasText(value)) {
@@ -172,16 +209,49 @@ public class ViettelPostShippingClient implements ViettelPostClient {
         }
 
         for (String fieldName : fieldNames) {
-            JsonNode direct = response.get(fieldName);
+            JsonNode direct = findField(response, fieldName);
             if (direct != null && !direct.isNull()) {
                 return direct.asText();
             }
         }
+        return null;
+    }
 
-        for (JsonNode child : response) {
-            String value = readText(child, fieldNames);
-            if (StringUtils.hasText(value)) {
-                return value;
+    private JsonNode parseJsonResponse(String responseBody, String operation) {
+        if (!StringUtils.hasText(responseBody)) {
+            throw new IllegalArgumentException("Viettel Post " + operation + " returned an empty response");
+        }
+
+        try {
+            return objectMapper.readTree(responseBody);
+        } catch (Exception exception) {
+            log.warn("Viettel Post {} response is not valid JSON: {}", operation, responseBody);
+            throw new ShippingProviderUnavailableException("Viettel Post " + operation + " failed", exception);
+        }
+    }
+
+    private JsonNode findField(JsonNode node, String fieldName) {
+        if (node == null || node.isNull()) {
+            return null;
+        }
+
+        JsonNode direct = node.get(fieldName);
+        if (direct != null && !direct.isNull()) {
+            return direct;
+        }
+
+        var fields = node.fields();
+        while (fields.hasNext()) {
+            var entry = fields.next();
+            if (entry.getKey().equalsIgnoreCase(fieldName) && entry.getValue() != null && !entry.getValue().isNull()) {
+                return entry.getValue();
+            }
+        }
+
+        for (JsonNode child : node) {
+            JsonNode nested = findField(child, fieldName);
+            if (nested != null && !nested.isNull()) {
+                return nested;
             }
         }
         return null;

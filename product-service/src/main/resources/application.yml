@@ -50,6 +50,11 @@ services:
     base-url: ${USER_SERVICE_BASE_URL:http://localhost:8081}
 pricing:
   average-refresh-cron: ${PRICING_AVERAGE_REFRESH_CRON:0 0 * * * *}
+product:
+  naming:
+    # Minimum AI confidence to dress a recognized name up into a full listing title.
+    # Below this, only the bare name is suggested; with no recognition, nothing is suggested.
+    confident-threshold: ${AI_NAMING_CONFIDENT_THRESHOLD:0.6}
 storage:
   upload-dir: ${STORAGE_UPLOAD_DIR:uploads}
 internal:

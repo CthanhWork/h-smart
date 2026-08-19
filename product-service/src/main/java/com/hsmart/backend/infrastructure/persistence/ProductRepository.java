@@ -20,6 +20,8 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
 
     Optional<Product> findByIdAndIsDeletedFalse(Long id);
 
+    Page<Product> findAllBySellerIdAndIsDeletedFalse(String sellerId, Pageable pageable);
+
     long countByIsDeletedFalseAndStatusIn(Collection<ProductStatus> statuses);
 
     @Modifying
@@ -47,4 +49,6 @@ public interface ProductRepository extends JpaRepository<Product, Long>, JpaSpec
             group by detection.value ->> 'label'
             """, nativeQuery = true)
     List<AveragePriceByLabelProjection> findAverageSoldPricesByAiLabel();
+
+    List<Product> findAllByIsDeletedFalseAndStatusIn(Collection<ProductStatus> statuses);
 }

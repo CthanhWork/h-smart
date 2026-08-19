@@ -18,4 +18,7 @@ public class ReportResponseDTO {
     private String reason;
     private ReportStatus status;
     private LocalDateTime createdAt;
+    private LocalDateTime processedAt;
+    private String processedBy;
+    private String resolutionReason;
 }
